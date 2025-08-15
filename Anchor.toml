@@ -5,6 +5,7 @@ package_manager = "yarn"
 resolution = true
 skip-lint = false
 
+
 [programs.devnet]
 universal_nft = "3HMT1ceCh8QQjA8kGDDY13hVD8emCSrJY2aUNQYif9AY"
 

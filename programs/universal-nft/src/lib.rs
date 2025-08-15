@@ -218,7 +218,7 @@ pub struct CreateNFTOrigin<'info> {
     #[account(
         init,
         payer = payer,
-        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1, // 4 bytes for String length
+        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1 + 100, // 4 bytes for String length + 100 bytes for String content
         seeds = [&nft_origin_seed(token_id)],
         bump
     )]
@@ -265,7 +265,7 @@ pub struct ReceiveCrossChainMessage<'info> {
     #[account(
         init,
         payer = payer,
-        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1, // 4 bytes for String length
+        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1 + 100, // 4 bytes for String length + 100 bytes for String content
         seeds = [&nft_origin_seed(token_id)],
         bump
     )]
