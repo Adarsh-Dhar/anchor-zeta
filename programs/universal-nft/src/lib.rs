@@ -2,8 +2,16 @@ use anchor_lang::prelude::*;
 
 declare_id!("3HMT1ceCh8QQjA8kGDDY13hVD8emCSrJY2aUNQYif9AY");
 
+// Helper function to generate NFT origin seed
+fn nft_origin_seed(token_id: u64) -> Vec<u8> {
+    let mut seed = Vec::new();
+    seed.extend_from_slice(b"nft_origin");
+    seed.extend_from_slice(&token_id.to_le_bytes());
+    seed
+}
+
 #[program]
-pub mod crosschain_nft {
+pub mod universal_nft {
     use super::*;
 
     /// Initialize the cross-chain NFT program
@@ -32,7 +40,7 @@ pub mod crosschain_nft {
     /// Create a new NFT origin record
     pub fn create_nft_origin(
         ctx: Context<CreateNFTOrigin>,
-        token_id: u64,
+        _token_id: u64,
         origin_chain: u16,
         origin_token_id: u64,
         metadata_uri: String,
@@ -40,7 +48,7 @@ pub mod crosschain_nft {
         require!(!ctx.accounts.program_state.paused, ErrorCode::ProgramPaused);
         
         let nft_origin = &mut ctx.accounts.nft_origin;
-        nft_origin.token_id = token_id;
+        nft_origin.token_id = _token_id;
         nft_origin.origin_chain = origin_chain;
         nft_origin.origin_token_id = origin_token_id;
         nft_origin.metadata_uri = metadata_uri;
@@ -49,7 +57,7 @@ pub mod crosschain_nft {
         nft_origin.bump = ctx.bumps.nft_origin;
 
         emit!(NFTOriginCreated {
-            token_id,
+            token_id: _token_id,
             origin_chain,
             origin_token_id,
             mint: ctx.accounts.mint.key(),
@@ -62,6 +70,7 @@ pub mod crosschain_nft {
     /// Initiate cross-chain transfer
     pub fn initiate_cross_chain_transfer(
         ctx: Context<CrossChainTransfer>,
+        _token_id: u64,
         destination_chain: u16,
         destination_owner: [u8; 32],
     ) -> Result<()> {
@@ -93,6 +102,7 @@ pub mod crosschain_nft {
     /// Handle incoming cross-chain message
     pub fn receive_cross_chain_message(
         ctx: Context<ReceiveCrossChainMessage>,
+        _token_id: u64,
         message: Vec<u8>,
     ) -> Result<()> {
         require!(!ctx.accounts.program_state.paused, ErrorCode::ProgramPaused);
@@ -100,7 +110,7 @@ pub mod crosschain_nft {
         // Parse the cross-chain message
         let cross_chain_message: CrossChainMessage = CrossChainMessage::try_from_slice(&message)?;
         
-        let program_state = &mut ctx.accounts.program_state;
+        let _program_state = &mut ctx.accounts.program_state;
         let token_id = cross_chain_message.token_id;
 
         // Create or update NFT origin record
@@ -197,6 +207,7 @@ pub struct Initialize<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(token_id: u64)]
 pub struct CreateNFTOrigin<'info> {
     #[account(
         mut,
@@ -208,7 +219,7 @@ pub struct CreateNFTOrigin<'info> {
         init,
         payer = payer,
         space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1, // 4 bytes for String length
-        seeds = [b"nft_origin", &[0u8; 10]],
+        seeds = [&nft_origin_seed(token_id)],
         bump
     )]
     pub nft_origin: Account<'info, NFTOrigin>,
@@ -220,6 +231,7 @@ pub struct CreateNFTOrigin<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(token_id: u64)]
 pub struct CrossChainTransfer<'info> {
     #[account(
         seeds = [b"program_state"],
@@ -227,16 +239,22 @@ pub struct CrossChainTransfer<'info> {
     )]
     pub program_state: Account<'info, ProgramState>,
     #[account(
-        seeds = [b"nft_origin", &[0u8; 10]],
+        seeds = [&nft_origin_seed(token_id)],
         bump = nft_origin.bump
     )]
     pub nft_origin: Account<'info, NFTOrigin>,
-    /// CHECK: Mint account (placeholder)
+    /// CHECK: Mint account
     pub mint: AccountInfo<'info>,
+    /// CHECK: User token account
+    pub user_token_account: AccountInfo<'info>,
+    #[account(mut)]
     pub user: Signer<'info>,
+    /// CHECK: SPL Token Program
+    pub token_program: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
+#[instruction(token_id: u64)]
 pub struct ReceiveCrossChainMessage<'info> {
     #[account(
         mut,
@@ -248,7 +266,7 @@ pub struct ReceiveCrossChainMessage<'info> {
         init,
         payer = payer,
         space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1, // 4 bytes for String length
-        seeds = [b"nft_origin", &[0u8; 10]], // Will be updated with actual token_id
+        seeds = [&nft_origin_seed(token_id)],
         bump
     )]
     pub nft_origin: Account<'info, NFTOrigin>,
@@ -334,4 +352,6 @@ pub enum ErrorCode {
     InvalidCrossChainMessage,
     #[msg("NFT origin not found")]
     NFTOriginNotFound,
+    #[msg("Insufficient tokens")]
+    InsufficientTokens,
 }
