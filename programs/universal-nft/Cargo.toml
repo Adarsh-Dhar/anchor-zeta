@@ -19,4 +19,5 @@ init-if-needed = ["anchor-lang/init-if-needed"]
 
 [dependencies]
 anchor-lang = "0.31.1"
+anchor-spl = { version = "0.31.1", features = ["idl-build"] }
 

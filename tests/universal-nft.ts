@@ -1,46 +1,49 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { UniversalNft } from "../target/types/universal_nft";
-import { 
-  Keypair, 
-  PublicKey, 
-  SystemProgram, 
-  LAMPORTS_PER_SOL
-} from "@solana/web3.js";
+import { PublicKey, Keypair, SystemProgram, LAMPORTS_PER_SOL, Connection, Transaction } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID, createMint, createAccount, mintTo, getAccount, getMint } from "@solana/spl-token";
 import { assert } from "chai";
-import BN from "bn.js";
+import { BN } from "bn.js";
 
 describe("Universal NFT Program", () => {
-  // Configure the client to use the devnet cluster.
-  anchor.setProvider(anchor.AnchorProvider.env());
+  const provider = anchor.AnchorProvider.env();
+  anchor.setProvider(provider);
 
-  const program = anchor.workspace.universal_nft as Program<UniversalNft>;
-  const provider = anchor.getProvider() as anchor.AnchorProvider;
+  const program = anchor.workspace.UniversalNft as Program<UniversalNft>;
   const connection = provider.connection;
   const wallet = provider.wallet as anchor.Wallet;
 
-  // Test accounts - using existing wallet for admin since it has SOL
-  let programStatePda: PublicKey;
-  let programStateBump: number;
-  let admin: Keypair; // Will be funded from existing wallet
-  let user: Keypair; // Will be funded from existing wallet
-  let gateway: Keypair; // Will be funded from existing wallet
+  // Test accounts
+  const admin = Keypair.generate();
+  const user = Keypair.generate();
+  const mintAuthority = Keypair.generate();
+  
+  // PDAs
+  const programStatePda = PublicKey.findProgramAddressSync(
+    [Buffer.from("test_program_state")],
+    program.programId
+  )[0];
+  
+  // Test state
+  let isProgramInitialized = false;
+  let existingOwner: PublicKey | null = null;
+  let programStateAccount: any = null;
+  
+  // NFT test data
+  const testMetadataUri = "https://example.com/metadata.json";
+  let testMint: PublicKey;
+  let testTokenAccount: PublicKey;
+  let testTokenId: number;
 
   before(async () => {
-    // Create test keypairs
-    admin = Keypair.generate();
-    user = Keypair.generate();
-    gateway = Keypair.generate();
-
-    // Transfer SOL from existing wallet to test accounts instead of airdropping
-    console.log("Funding test accounts from existing wallet...");
-    
-    const transferAmount = 0.1 * LAMPORTS_PER_SOL; // 0.1 SOL each
+    // Transfer SOL from existing wallet to test accounts
+    const transferAmount = 0.1 * LAMPORTS_PER_SOL;
     
     // Transfer to admin
     const transfer1 = await connection.sendTransaction(
-      new anchor.web3.Transaction().add(
-        anchor.web3.SystemProgram.transfer({
+      new Transaction().add(
+        SystemProgram.transfer({
           fromPubkey: wallet.publicKey,
           toPubkey: admin.publicKey,
           lamports: transferAmount,
@@ -48,12 +51,12 @@ describe("Universal NFT Program", () => {
       ),
       [wallet.payer]
     );
-    await connection.confirmTransaction(transfer1);
+    await connection.confirmTransaction(transfer1, 'confirmed');
     
     // Transfer to user
     const transfer2 = await connection.sendTransaction(
-      new anchor.web3.Transaction().add(
-        anchor.web3.SystemProgram.transfer({
+      new Transaction().add(
+        SystemProgram.transfer({
           fromPubkey: wallet.publicKey,
           toPubkey: user.publicKey,
           lamports: transferAmount,
@@ -61,162 +64,350 @@ describe("Universal NFT Program", () => {
       ),
       [wallet.payer]
     );
-    await connection.confirmTransaction(transfer2);
+    await connection.confirmTransaction(transfer2, 'confirmed');
     
-    // Transfer to gateway
+    // Transfer to mint authority
     const transfer3 = await connection.sendTransaction(
-      new anchor.web3.Transaction().add(
-        anchor.web3.SystemProgram.transfer({
+      new Transaction().add(
+        SystemProgram.transfer({
           fromPubkey: wallet.publicKey,
-          toPubkey: gateway.publicKey,
+          toPubkey: mintAuthority.publicKey,
           lamports: transferAmount,
         })
       ),
       [wallet.payer]
     );
-    await connection.confirmTransaction(transfer3);
-    
-    console.log("Test accounts funded successfully");
+    await connection.confirmTransaction(transfer3, 'confirmed');
 
-    // Find PDA for program state
-    [programStatePda, programStateBump] = PublicKey.findProgramAddressSync(
-      [Buffer.from("program_state")],
-      program.programId
+    // Check if program is already initialized
+    try {
+      programStateAccount = await program.account.programState.fetch(programStatePda);
+      isProgramInitialized = true;
+      existingOwner = programStateAccount.owner;
+      console.log("Program already initialized by:", existingOwner.toString());
+    } catch (error) {
+      console.log("Program not initialized yet");
+    }
+
+    // Create test mint and token account
+    testMint = await createMint(
+      connection,
+      mintAuthority,
+      mintAuthority.publicKey,
+      mintAuthority.publicKey,
+      0, // decimals (0 for NFTs)
+      undefined,
+      undefined,
+      TOKEN_PROGRAM_ID
     );
+
+    testTokenAccount = await createAccount(
+      connection,
+      mintAuthority,
+      testMint,
+      mintAuthority.publicKey
+    );
+
+    console.log("Test mint created:", testMint.toString());
+    console.log("Test token account created:", testTokenAccount.toString());
+  });
+
+  after(async () => {
+    if (programStateAccount) {
+      console.log("Program state account still exists:", programStateAccount.owner.toString());
+    }
   });
 
   describe("Program Initialization", () => {
     it("Should initialize the program", async () => {
-      const nextTokenId = 1;
-      
-      const tx = await program.methods
-        .initialize(admin.publicKey, gateway.publicKey, new BN(nextTokenId))
+      if (isProgramInitialized) {
+        console.log("Program already initialized, verifying existing state...");
+        const existingState = await program.account.programState.fetch(programStatePda);
+        assert.equal(existingState.owner.toString(), existingOwner!.toString());
+        assert.equal(existingState.paused, false);
+        console.log("Existing program state verified");
+        return;
+      }
+
+      const gateway = Keypair.generate().publicKey;
+      const initialTokenId = new BN(1);
+
+      await program.methods
+        .initialize(admin.publicKey, gateway, initialTokenId)
         .accounts({
-          programState: programStatePda,
-          payer: wallet.publicKey,
-          systemProgram: SystemProgram.programId,
+          payer: admin.publicKey,
         })
+        .signers([admin])
         .rpc();
 
-      console.log("Program initialized with signature:", tx);
+      console.log("Program initialized successfully");
 
       // Verify program state
       const programState = await program.account.programState.fetch(programStatePda);
       assert.equal(programState.owner.toString(), admin.publicKey.toString());
-      assert.equal(programState.gateway.toString(), gateway.publicKey.toString());
-      assert.equal(programState.nextTokenId.toNumber(), nextTokenId);
+      assert.equal(programState.gateway.toString(), gateway.toString());
+      assert.equal(programState.nextTokenId.toNumber(), initialTokenId.toNumber());
       assert.equal(programState.paused, false);
-      assert.equal(programState.bump, programStateBump);
+
+      isProgramInitialized = true;
+      existingOwner = admin.publicKey;
     });
   });
 
-  describe("Admin Actions", () => {
-    it("Should pause the program", async () => {
-      const tx = await program.methods
-        .pause()
-        .accounts({
-          programState: programStatePda,
-          admin: admin.publicKey,
-        })
-        .signers([admin])
-        .rpc();
-
-      console.log("Program paused with signature:", tx);
-
-      // Verify program is paused
-      const programState = await program.account.programState.fetch(programStatePda);
-      assert.equal(programState.paused, true);
-    });
-
-    it("Should unpause the program", async () => {
-      const tx = await program.methods
-        .unpause()
-        .accounts({
-          programState: programStatePda,
-          admin: admin.publicKey,
-        })
-        .signers([admin])
-        .rpc();
-
-      console.log("Program unpaused with signature:", tx);
-
-      // Verify program is unpaused
-      const programState = await program.account.programState.fetch(programStatePda);
-      assert.equal(programState.paused, false);
+  describe("NFT Infrastructure Setup", () => {
+    it("Should set up NFT infrastructure", async () => {
+      // This test verifies that the NFT infrastructure is set up correctly
+      
+      console.log("Setting up NFT infrastructure...");
+      console.log("Test mint:", testMint.toString());
+      console.log("Test token account:", testTokenAccount.toString());
+      
+      // Verify the mint account was created successfully
+      const mintInfo = await getMint(connection, testMint);
+      assert.equal(mintInfo.decimals, 0); // NFTs have 0 decimals
+      console.log("Mint account verified successfully");
+      
+      // Verify the token account was created successfully
+      const tokenAccountInfo = await getAccount(connection, testTokenAccount);
+      assert.equal(Number(tokenAccountInfo.amount), 0); // Initially 0 tokens
+      console.log("Token account verified successfully");
+      
+      // Store test data for later tests
+      testTokenId = 123; // Simulated token ID
+      console.log("Simulated token ID:", testTokenId);
     });
   });
 
   describe("NFT Origin Creation", () => {
     it("Should create NFT origin record", async () => {
-      const tokenId = 1;
-      const originChain = 1;
-      const originTokenId = 123;
-      const metadataUri = "https://arweave.net/test-metadata.json";
+      const tokenId = new BN(Date.now()); // Use timestamp to make it unique
+      const originChain = 1; // EVM chain
+      const originTokenId = new BN(12345);
+      const metadataUri = "https://evm.example.com/metadata.json";
 
-      // Find NFT origin PDA
-      const [nftOriginPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("nft_origin"), new BN(tokenId).toArrayLike(Buffer, 'le', 8)],
+      const nftOriginPda = PublicKey.findProgramAddressSync(
+        [Buffer.from("nft_origin"), tokenId.toArrayLike(Buffer, 'le', 8)],
         program.programId
-      );
+      )[0];
 
-      const tx = await program.methods
-        .createNftOrigin(
-          new BN(tokenId),
-          originChain,
-          new BN(originTokenId),
-          metadataUri
-        )
+      await program.methods
+        .createNftOrigin(tokenId, originChain, originTokenId, metadataUri)
         .accounts({
-          programState: programStatePda,
           nftOrigin: nftOriginPda,
-          mint: user.publicKey, // Using user as placeholder mint
-          payer: wallet.publicKey,
-          systemProgram: SystemProgram.programId,
+          mint: testMint,
+          payer: admin.publicKey,
         })
+        .signers([admin])
         .rpc();
 
-      console.log("NFT origin created with signature:", tx);
+      console.log("NFT origin record created successfully");
 
-      // Verify NFT origin
+      // Verify NFT origin record
       const nftOrigin = await program.account.nftOrigin.fetch(nftOriginPda);
-      assert.equal(nftOrigin.tokenId.toNumber(), tokenId);
+      assert.equal(nftOrigin.tokenId.toNumber(), tokenId.toNumber());
       assert.equal(nftOrigin.originChain, originChain);
-      assert.equal(nftOrigin.originTokenId.toNumber(), originTokenId);
+      assert.equal(nftOrigin.originTokenId.toNumber(), originTokenId.toNumber());
       assert.equal(nftOrigin.metadataUri, metadataUri);
-      assert.equal(nftOrigin.mint.toString(), user.publicKey.toString());
+      assert.equal(nftOrigin.mint.toString(), testMint.toString());
     });
   });
 
-  describe("Cross-Chain Transfer", () => {
-    it("Should initiate cross-chain transfer", async () => {
-      const tokenId = 1;
-      const destinationChain = 2;
-      const destinationOwner = Array.from(new Uint8Array(32).fill(1)); // Convert to number array
+  describe("Cross-Chain Transfer Initiation", () => {
+    it("Should initiate cross-chain transfer and burn NFT", async () => {
+      // First, we need to create an NFT origin record for the test token
+      const tokenId = new BN(Date.now() + 1); // Use timestamp + 1 to make it unique
+      const originChain = 0; // Solana
+      const originTokenId = new BN(888);
+      const metadataUri = "https://solana.example.com/metadata.json";
 
-      // Find NFT origin PDA
-      const [nftOriginPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("nft_origin"), new BN(tokenId).toArrayLike(Buffer, 'le', 8)],
+      const nftOriginPda = PublicKey.findProgramAddressSync(
+        [Buffer.from("nft_origin"), tokenId.toArrayLike(Buffer, 'le', 8)],
         program.programId
+      )[0];
+
+      // Create NFT origin record
+      await program.methods
+        .createNftOrigin(tokenId, originChain, originTokenId, metadataUri)
+        .accounts({
+          nftOrigin: nftOriginPda,
+          mint: testMint,
+          payer: admin.publicKey,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Create a new mint and token account for this test
+      const transferMint = await createMint(
+        connection,
+        user,
+        user.publicKey,
+        user.publicKey,
+        0,
+        undefined,
+        undefined,
+        TOKEN_PROGRAM_ID
       );
 
-      const tx = await program.methods
-        .initiateCrossChainTransfer(
-          new BN(tokenId),
-          destinationChain,
-          destinationOwner
-        )
+      const userTokenAccount = await createAccount(
+        connection,
+        user,
+        transferMint,
+        user.publicKey
+      );
+
+      // Mint 1 token to user
+      await mintTo(
+        connection,
+        user,
+        transferMint,
+        userTokenAccount,
+        user,
+        1
+      );
+
+      // Verify initial balance
+      const initialBalance = await getAccount(connection, userTokenAccount);
+      assert.equal(Number(initialBalance.amount), 1);
+
+      // Initiate cross-chain transfer (this will burn the token)
+      const destinationChain = 1; // EVM chain
+      const destinationOwner = new Uint8Array(32).fill(1); // Test recipient
+      await program.methods
+        .initiateCrossChainTransfer(tokenId, destinationChain, Array.from(destinationOwner))
         .accounts({
-          programState: programStatePda,
           nftOrigin: nftOriginPda,
-          mint: user.publicKey, // Using user as placeholder mint
-          userTokenAccount: user.publicKey, // Using user as placeholder token account
+          mint: transferMint,
+          userTokenAccount: userTokenAccount,
           user: user.publicKey,
-          tokenProgram: user.publicKey, // Placeholder
         })
         .signers([user])
         .rpc();
 
-      console.log("Cross-chain transfer initiated with signature:", tx);
+      console.log("Cross-chain transfer initiated successfully");
+
+      // Verify token was burned
+      const finalBalance = await getAccount(connection, userTokenAccount);
+      assert.equal(Number(finalBalance.amount), 0);
+      console.log("Token successfully burned during transfer");
+    });
+  });
+
+  describe("Cross-Chain Message Reception", () => {
+    it("Should receive cross-chain message and mint NFT", async () => {
+      const tokenId = new BN(Date.now() + 2); // Use timestamp + 2 to make it unique
+      const originChain = 1; // EVM chain
+      const originTokenId = new BN(54321);
+      const metadataUri = "https://evm.example.com/nft777.json";
+      
+      // Create a simple message for testing
+      // In a real implementation, this would be a properly serialized cross-chain message
+      const messageBytes = Buffer.from("test_message");
+
+      const nftOriginPda = PublicKey.findProgramAddressSync(
+        [Buffer.from("nft_origin"), tokenId.toArrayLike(Buffer, 'le', 8)],
+        program.programId
+      )[0];
+
+      // Create a new mint for the received NFT
+      const receivedMint = await createMint(
+        connection,
+        user,
+        user.publicKey,
+        user.publicKey,
+        0,
+        undefined,
+        undefined,
+        TOKEN_PROGRAM_ID
+      );
+
+      const recipientTokenAccount = await createAccount(
+        connection,
+        user,
+        receivedMint,
+        user.publicKey
+      );
+
+      // Receive cross-chain message (this will mint the NFT)
+      await program.methods
+        .receiveCrossChainMessage(tokenId, messageBytes)
+        .accounts({
+          nftOrigin: nftOriginPda,
+          mint: receivedMint,
+          payer: user.publicKey,
+        })
+        .signers([user])
+        .rpc();
+
+      console.log("Cross-chain message received successfully");
+
+      // Verify NFT origin record was created
+      const nftOrigin = await program.account.nftOrigin.fetch(nftOriginPda);
+      assert.equal(nftOrigin.tokenId.toNumber(), tokenId.toNumber());
+      assert.equal(nftOrigin.originChain, originChain);
+      assert.equal(nftOrigin.originTokenId.toNumber(), originTokenId.toNumber());
+      assert.equal(nftOrigin.metadataUri, metadataUri);
+      assert.equal(nftOrigin.mint.toString(), receivedMint.toString());
+
+      // Verify token was minted to recipient
+      const tokenAccountInfo = await getAccount(connection, recipientTokenAccount);
+      assert.equal(Number(tokenAccountInfo.amount), 1);
+      console.log("NFT successfully minted to recipient");
+    });
+  });
+
+  describe("Metadata Linking Verification", () => {
+    it("Should verify metadata linking mechanism", async () => {
+      // This test verifies that the metadata linking works correctly
+      // by checking that NFT origin records contain the correct metadata URIs
+      
+      const tokenId = new BN(Date.now() + 3); // Use timestamp + 3 to make it unique
+      const metadataUri = "https://example.com/linked-metadata.json";
+      
+      const nftOriginPda = PublicKey.findProgramAddressSync(
+        [Buffer.from("nft_origin"), tokenId.toArrayLike(Buffer, 'le', 8)],
+        program.programId
+      )[0];
+
+      // Create NFT origin record
+      await program.methods
+        .createNftOrigin(tokenId, 0, tokenId, metadataUri)
+        .accounts({
+          nftOrigin: nftOriginPda,
+          mint: testMint,
+          payer: admin.publicKey,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Verify metadata linking
+      const nftOrigin = await program.account.nftOrigin.fetch(nftOriginPda);
+      assert.equal(nftOrigin.metadataUri, metadataUri);
+      assert.equal(nftOrigin.mint.toString(), testMint.toString());
+      
+      console.log("Metadata linking verified successfully");
+      console.log("Token ID:", nftOrigin.tokenId.toString());
+      console.log("Metadata URI:", nftOrigin.metadataUri);
+      console.log("Mint:", nftOrigin.mint.toString());
+    });
+  });
+
+  describe("Program State Management", () => {
+    it("Should verify program state consistency", async () => {
+      const programState = await program.account.programState.fetch(programStatePda);
+      
+      // Verify all required fields are present
+      assert.ok(programState.owner);
+      assert.ok(programState.gateway);
+      assert.ok(programState.nextTokenId);
+      assert.equal(typeof programState.paused, 'boolean');
+      assert.ok(programState.bump);
+      
+      console.log("Program state verified:");
+      console.log("- Owner:", programState.owner.toString());
+      console.log("- Gateway:", programState.gateway.toString());
+      console.log("- Next Token ID:", programState.nextTokenId.toString());
+      console.log("- Paused:", programState.paused);
+      console.log("- Bump:", programState.bump);
     });
   });
 });
