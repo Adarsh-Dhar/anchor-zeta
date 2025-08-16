@@ -301,7 +301,7 @@ pub struct MintNFT<'info> {
     #[account(
         init,
         payer = payer,
-        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1 + 100,
+        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1 + 500,
         seeds = [b"nft_origin", &[0u8; 10]], // Placeholder seed, will be updated in instruction
         bump
     )]
@@ -329,7 +329,7 @@ pub struct CreateNFTOrigin<'info> {
     #[account(
         init,
         payer = payer,
-        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1 + 100, // 4 bytes for String length + 100 bytes for String content
+        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1 + 500, // 8 (discriminator) + 8 (token_id) + 2 (origin_chain) + 8 (origin_token_id) + 4 (String length) + 500 (String content) + 32 (mint) + 8 (created_at) + 1 (bump)
         seeds = [&nft_origin_seed(token_id)],
         bump
     )]
@@ -375,7 +375,7 @@ pub struct ReceiveCrossChainMessage<'info> {
     #[account(
         init,
         payer = payer,
-        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1 + 100, // 4 bytes for String length + 100 bytes for String content
+        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1 + 500, // 8 (discriminator) + 8 (token_id) + 2 (origin_chain) + 8 (origin_token_id) + 4 (String length) + 500 (String content) + 32 (mint) + 8 (created_at) + 1 (bump)
         seeds = [&nft_origin_seed(token_id)],
         bump
     )]
