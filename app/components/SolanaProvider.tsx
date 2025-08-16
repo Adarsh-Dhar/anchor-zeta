@@ -1,0 +1,57 @@
+"use client";
+
+import React, { FC, ReactNode, useMemo } from "react";
+import {
+  ConnectionProvider,
+  WalletProvider
+} from "@solana/wallet-adapter-react";
+import { WalletAdapterNetwork } from "@solana/wallet-adapter-base";
+import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
+import { clusterApiUrl } from "@solana/web3.js";
+import {
+  PhantomWalletAdapter,
+  SolflareWalletAdapter,
+} from "@solana/wallet-adapter-wallets";
+import "@solana/wallet-adapter-react-ui/styles.css";
+
+interface SolanaProviderProps {
+  children: ReactNode;
+}
+
+export const SolanaProvider: FC<SolanaProviderProps> = ({ children }) => {
+  // The network can be set to 'devnet', 'testnet', or 'mainnet-beta'
+  const network = WalletAdapterNetwork.Devnet;
+
+  // Use a more reliable RPC endpoint
+  const endpoint = useMemo(() => {
+    const defaultEndpoint = clusterApiUrl(network);
+    console.log('Solana endpoint:', defaultEndpoint);
+    return defaultEndpoint;
+  }, [network]);
+
+  // Initialize wallet adapters - start with just the most reliable ones
+  const wallets = useMemo(() => {
+    try {
+      const walletAdapters = [
+        new PhantomWalletAdapter(),
+        new SolflareWalletAdapter(),
+      ];
+      
+      console.log('Initialized wallet adapters:', walletAdapters.map(w => w.name));
+      return walletAdapters;
+    } catch (error) {
+      console.error('Error initializing wallet adapters:', error);
+      return [];
+    }
+  }, []);
+
+  console.log('SolanaProvider rendering with:', { network, endpoint, walletCount: wallets.length });
+
+  return (
+    <ConnectionProvider endpoint={endpoint}>
+      <WalletProvider wallets={wallets} autoConnect>
+        <WalletModalProvider>{children}</WalletModalProvider>
+      </WalletProvider>
+    </ConnectionProvider>
+  );
+};

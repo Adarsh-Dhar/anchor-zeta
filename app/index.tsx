@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react'
+import { SolanaProvider } from './components/SolanaProvider'
+import { WalletConnect } from './components/WalletConnect'
 
 interface ProgramState {
   owner: string
@@ -18,10 +20,8 @@ interface NFTOrigin {
   bump: number
 }
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState('overview')
-  const [walletConnected, setWalletConnected] = useState(false)
-  const [walletAddress, setWalletAddress] = useState('')
   const [programState, setProgramState] = useState<ProgramState | null>(null)
   const [nftOrigins, setNftOrigins] = useState<NFTOrigin[]>([])
 
@@ -46,16 +46,6 @@ const App: React.FC = () => {
       }
     ])
   }, [])
-
-  const connectWallet = () => {
-    setWalletConnected(true)
-    setWalletAddress('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1')
-  }
-
-  const disconnectWallet = () => {
-    setWalletConnected(false)
-    setWalletAddress('')
-  }
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
@@ -286,32 +276,7 @@ const App: React.FC = () => {
               <h1 className="text-xl font-bold text-blue-600">Universal NFT</h1>
             </div>
             
-            <div className="flex items-center space-x-4">
-              {walletConnected ? (
-                <div className="flex items-center space-x-3">
-                  <div className="flex items-center space-x-2 px-3 py-2 bg-green-100 rounded-lg">
-                    <div className="w-4 h-4 bg-green-600 rounded-full"></div>
-                    <span className="text-sm text-green-800 font-medium">Connected</span>
-                  </div>
-                  <span className="text-sm text-gray-600 font-mono">
-                    {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
-                  </span>
-                  <button
-                    onClick={disconnectWallet}
-                    className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded-lg"
-                  >
-                    Disconnect
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={connectWallet}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg"
-                >
-                  Connect Wallet
-                </button>
-              )}
-            </div>
+            <WalletConnect />
           </div>
         </div>
       </header>
@@ -349,6 +314,14 @@ const App: React.FC = () => {
         </div>
       </footer>
     </div>
+  )
+}
+
+const App: React.FC = () => {
+  return (
+    <SolanaProvider>
+      <AppContent />
+    </SolanaProvider>
   )
 }
 
