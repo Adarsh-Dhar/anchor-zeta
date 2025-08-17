@@ -15,6 +15,7 @@ export const useProgram = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [crossChainLogs, setCrossChainLogs] = useState<any>(null);
 
   // Load program data
   const loadProgramData = useCallback(async () => {
@@ -218,43 +219,62 @@ export const useProgram = () => {
     }
   }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
 
-  // Initiate cross-chain transfer
-  const initiateTransfer = useCallback(async (
+  // Enhanced cross-chain transfer with destination logging
+  const initiateTransferWithLogging = useCallback(async (
     tokenId: number,
     destinationChain: number,
     destinationOwner: string
   ) => {
+    console.log('=== HOOK: initiateTransferWithLogging START ===');
+    console.log('Input parameters:', { tokenId, destinationChain, destinationOwner });
+    console.log('Wallet connected:', wallet.connected);
+    console.log('Connection available:', !!connection);
+    console.log('Wallet public key:', wallet.publicKey?.toString());
+    
     if (!wallet.connected || !connection || !wallet.publicKey) {
       throw new Error('Wallet not connected');
     }
 
     try {
+      console.log('Setting loading state...');
       setLoading(true);
       setError(null);
       setSuccess(null);
+      setCrossChainLogs(null);
       
+      console.log('Creating UniversalNFTClient...');
       const client = new UniversalNFTClient(connection, wallet);
       
       // Convert destination owner string to Uint8Array
+      console.log('Converting destination owner to bytes...');
       const destinationOwnerBytes = new TextEncoder().encode(destinationOwner);
+      console.log('Destination owner bytes:', destinationOwnerBytes);
       
-      const signature = await client.initiateCrossChainTransfer(
+      console.log('Calling client.initiateCrossChainTransferWithLogging...');
+      const result = await client.initiateCrossChainTransferWithLogging(
         tokenId,
         destinationChain,
         destinationOwnerBytes
       );
       
-      setSuccess(`Transfer initiated! Signature: ${signature}`);
+      console.log('Transfer successful! Result:', result);
+      setCrossChainLogs(result.destinationLogs);
+      setSuccess(`Transfer initiated! Solana TX: ${result.solanaTxSignature.slice(0, 8)}...`);
       
       // Reload data after successful transaction
       setTimeout(loadProgramData, 2000);
       
-      return signature;
+      console.log('=== HOOK: initiateTransferWithLogging END ===');
+      return result;
     } catch (err: any) {
+      console.error('=== HOOK: initiateTransferWithLogging ERROR ===');
+      console.error('Error in hook:', err);
       const errorMessage = err.message || 'Failed to initiate transfer';
       setError(errorMessage);
+      console.error('=== HOOK: initiateTransferWithLogging ERROR END ===');
       throw new Error(errorMessage);
     } finally {
+      console.log('Setting loading to false...');
       setLoading(false);
     }
   }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
@@ -383,13 +403,14 @@ export const useProgram = () => {
     loading,
     error,
     success,
+    crossChainLogs,
     
     // Actions
     initialize,
     createMint,
     mintNFT,
     createNFTOrigin,
-    initiateTransfer,
+    initiateTransferWithLogging,
     receiveMessage,
     pauseProgram,
     unpauseProgram,

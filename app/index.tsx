@@ -33,12 +33,13 @@ const AppContent: React.FC = () => {
     createMint,
     mintNFT,
     createNFTOrigin,
-    initiateTransfer,
     receiveMessage,
     pauseProgram,
     unpauseProgram,
     clearMessages,
-    isConnected
+    isConnected,
+    crossChainLogs,
+    initiateTransferWithLogging
   } = useProgram()
 
   const [activeTab, setActiveTab] = useState('overview')
@@ -286,7 +287,14 @@ const AppContent: React.FC = () => {
     }
     
     try {
-      await initiateTransfer(transferForm.tokenId, transferForm.destinationChain, transferForm.destinationOwner)
+      await initiateTransferWithLogging(transferForm.tokenId, transferForm.destinationChain, transferForm.destinationOwner)
+      
+      // Clear form after successful transfer
+      setTransferForm({
+        tokenId: 1,
+        destinationChain: 7001, // Default to ZetaChain Testnet
+        destinationOwner: ''
+      });
     } catch (err) {
       // Error is already handled by the hook
     }
@@ -788,6 +796,23 @@ const AppContent: React.FC = () => {
                 {loading ? 'Initiating...' : 'Initiate Transfer'}
               </button>
             </form>
+            {crossChainLogs && (
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mt-6">
+                <h4 className="text-lg font-semibold text-gray-900 mb-3">
+                  Cross-Chain Transfer Logs
+                </h4>
+                <div className="bg-white border border-gray-200 rounded p-3 max-h-96 overflow-y-auto">
+                  <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono">
+                    {crossChainLogs.logs.join('\n')}
+                  </pre>
+                </div>
+                <div className="mt-3 text-sm text-gray-600">
+                  <p><strong>Status:</strong> {crossChainLogs.status}</p>
+                  <p><strong>Destination Chain:</strong> {crossChainLogs.destinationChainName}</p>
+                  <p><strong>Destination Owner:</strong> {crossChainLogs.destinationOwner}</p>
+                </div>
+              </div>
+            )}
           </div>
         )
 
@@ -947,3 +972,4 @@ const App: React.FC = () => {
 }
 
 export default App
+
