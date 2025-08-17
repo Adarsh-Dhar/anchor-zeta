@@ -59,13 +59,11 @@ export const useProgram = () => {
       
       const client = new UniversalNFTClient(connection, wallet);
       const signature = await client.initialize(
-        new PublicKey(owner),
         new PublicKey(gateway),
         nextTokenId
       );
       
       setSuccess(`Program initialized! Signature: ${signature}`);
-      
       // Reload data after successful transaction
       setTimeout(loadProgramData, 2000);
       

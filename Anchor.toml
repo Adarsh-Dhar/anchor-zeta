@@ -7,7 +7,7 @@ skip-lint = false
 
 
 [programs.devnet]
-universal_nft = "3HMT1ceCh8QQjA8kGDDY13hVD8emCSrJY2aUNQYif9AY"
+universal_nft = "C2jwo1xMeUzb2Pb4xHU72yi4HrSzDdTZKXxtaJH6M5NX"
 
 [registry]
 url = "https://api.apr.dev"

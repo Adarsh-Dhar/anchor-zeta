@@ -1,9 +1,9 @@
 import { Program, AnchorProvider, web3, BN } from '@coral-xyz/anchor';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
-import { IDL } from '../idl/universal_nft';
+import IDL from '../../target/idl/universal_nft.json';
 
-export const PROGRAM_ID = new PublicKey('3HMT1ceCh8QQjA8kGDDY13hVD8emCSrJY2aUNQYif9AY');
+export const PROGRAM_ID = new PublicKey('C2jwo1xMeUzb2Pb4xHU72yi4HrSzDdTZKXxtaJH6M5NX');
 
 export interface ProgramState {
   owner: PublicKey;
@@ -65,12 +65,12 @@ export class UniversalNFTClient {
   }
 
   // Initialize the program
-  async initialize(owner: PublicKey, gateway: PublicKey, nextTokenId: number): Promise<string> {
+  async initialize(gateway: PublicKey, nextTokenId: number): Promise<string> {
     try {
       const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
       
       const tx = await this.program.methods
-        .initialize(owner, gateway, new BN(nextTokenId))
+        .initialize(gateway, new BN(nextTokenId))
         .accounts({
           programState: programStatePDA,
           payer: this.wallet.publicKey,

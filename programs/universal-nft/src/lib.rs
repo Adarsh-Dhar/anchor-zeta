@@ -2,8 +2,9 @@ use anchor_lang::prelude::*;
 use anchor_spl::{
     token::{Mint, Token, TokenAccount, MintTo, Burn},
 };
+use std::str::FromStr;
 
-declare_id!("3HMT1ceCh8QQjA8kGDDY13hVD8emCSrJY2aUNQYif9AY");
+declare_id!("C2jwo1xMeUzb2Pb4xHU72yi4HrSzDdTZKXxtaJH6M5NX");
 
 // Helper function to generate NFT origin seed
 fn nft_origin_seed(token_id: u64) -> Vec<u8> {
@@ -36,19 +37,19 @@ pub mod universal_nft {
     /// Initialize the cross-chain NFT program
     pub fn initialize(
         ctx: Context<Initialize>,
-        owner: Pubkey,
         gateway: Pubkey,
         next_token_id: u64,
     ) -> Result<()> {
         let program_state = &mut ctx.accounts.program_state;
-        program_state.owner = owner;
+        // Hardcode the admin address
+        program_state.owner = Pubkey::from_str("F79VcAwM6VhL9CaZo68W1SwrkntLJpAhcbTLLzuz4g3G").unwrap();
         program_state.gateway = gateway;
         program_state.next_token_id = next_token_id;
         program_state.paused = false;
         program_state.bump = ctx.bumps.program_state;
         
         emit!(ProgramInitialized {
-            owner,
+            owner: program_state.owner,
             gateway,
             initial_token_id: next_token_id,
         });
