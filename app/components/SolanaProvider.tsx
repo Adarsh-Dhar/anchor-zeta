@@ -1,6 +1,6 @@
 "use client";
 
-import React, { FC, ReactNode, useMemo } from "react";
+import { FC, ReactNode, useMemo } from "react";
 import {
   ConnectionProvider,
   WalletProvider

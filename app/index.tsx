@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { SolanaProvider } from './components/SolanaProvider'
 import { WalletConnect } from './components/WalletConnect'
+import { useProgram } from './hooks/useProgram'
 
-interface ProgramState {
+interface FrontendProgramState {
   owner: string
   gateway: string
   nextTokenId: number
@@ -10,7 +11,7 @@ interface ProgramState {
   bump: number
 }
 
-interface NFTOrigin {
+interface FrontendNFTOrigin {
   tokenId: number
   originChain: number
   originTokenId: number
@@ -21,31 +22,139 @@ interface NFTOrigin {
 }
 
 const AppContent: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('overview')
-  const [programState, setProgramState] = useState<ProgramState | null>(null)
-  const [nftOrigins, setNftOrigins] = useState<NFTOrigin[]>([])
+  const {
+    programState,
+    nftOrigins,
+    loading,
+    error,
+    success,
+    initialize,
+    mintNFT,
+    createNFTOrigin,
+    initiateTransfer,
+    receiveMessage,
+    pauseProgram,
+    unpauseProgram,
+    clearMessages,
+    isConnected
+  } = useProgram()
 
-  useEffect(() => {
-    setProgramState({
-      owner: '5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1',
-      gateway: 'Gateway111111111111111111111111111111111111111',
-      nextTokenId: 1001,
-      paused: false,
-      bump: 1
-    })
-    
-    setNftOrigins([
-      {
-        tokenId: 1000,
-        originChain: 0,
-        originTokenId: 1000,
-        metadataUri: 'https://arweave.net/example-metadata-1',
-        mint: 'Mint111111111111111111111111111111111111111111',
-        createdAt: Date.now() / 1000,
-        bump: 1
-      }
-    ])
-  }, [])
+  const [activeTab, setActiveTab] = useState('overview')
+
+  // Form states
+  const [initializeForm, setInitializeForm] = useState({
+    owner: '',
+    gateway: '',
+    nextTokenId: 1
+  })
+  const [mintForm, setMintForm] = useState({
+    uri: '',
+    mint: ''
+  })
+  const [createOriginForm, setCreateOriginForm] = useState({
+    tokenId: 1,
+    originChain: 0,
+    metadataUri: ''
+  })
+  const [transferForm, setTransferForm] = useState({
+    tokenId: 1,
+    destinationChain: 1
+  })
+  const [receiveForm, setReceiveForm] = useState({
+    tokenId: 1,
+    message: ''
+  })
+
+  // Convert program state to frontend format
+  const frontendProgramState: FrontendProgramState | null = programState ? {
+    owner: programState.owner.toString(),
+    gateway: programState.gateway.toString(),
+    nextTokenId: programState.nextTokenId.toNumber(),
+    paused: programState.paused,
+    bump: programState.bump
+  } : null
+
+  // Convert NFT origins to frontend format
+  const frontendNFTOrigins: FrontendNFTOrigin[] = nftOrigins.map(origin => ({
+    tokenId: origin.tokenId.toNumber(),
+    originChain: origin.originChain,
+    originTokenId: origin.originTokenId.toNumber(),
+    metadataUri: origin.metadataUri,
+    mint: origin.mint.toString(),
+    createdAt: origin.createdAt.toNumber(),
+    bump: origin.bump
+  }))
+
+  const handleInitialize = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      await initialize(initializeForm.owner, initializeForm.gateway, initializeForm.nextTokenId)
+    } catch (err) {
+      // Error is already handled by the hook
+    }
+  }
+
+  const handleMintNFT = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      await mintNFT(mintForm.uri, mintForm.mint)
+    } catch (err) {
+      // Error is already handled by the hook
+    }
+  }
+
+  const handleCreateOrigin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      await createNFTOrigin(
+        createOriginForm.tokenId,
+        createOriginForm.originChain,
+        createOriginForm.tokenId,
+        createOriginForm.metadataUri,
+        '11111111111111111111111111111111' // Placeholder mint
+      )
+    } catch (err) {
+      // Error is already handled by the hook
+    }
+  }
+
+  const handleTransfer = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      await initiateTransfer(transferForm.tokenId, transferForm.destinationChain)
+    } catch (err) {
+      // Error is already handled by the hook
+    }
+  }
+
+  const handleReceive = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      await receiveMessage(
+        receiveForm.tokenId,
+        receiveForm.message,
+        '11111111111111111111111111111111' // Placeholder mint
+      )
+    } catch (err) {
+      // Error is already handled by the hook
+    }
+  }
+
+  const handlePause = async () => {
+    try {
+      await pauseProgram()
+    } catch (err) {
+      // Error is already handled by the hook
+    }
+  }
+
+  const handleUnpause = async () => {
+    try {
+      await unpauseProgram()
+    } catch (err) {
+      // Error is already handled by the hook
+    }
+  }
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
@@ -62,22 +171,74 @@ const AppContent: React.FC = () => {
       case 'overview':
         return (
           <div className="space-y-6">
+            {!isConnected && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <p className="text-yellow-800">Please connect your wallet to view program data</p>
+              </div>
+            )}
+            
+            {loading && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-blue-800">Loading program data...</p>
+              </div>
+            )}
+            
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-red-800">{error}</p>
+                <button 
+                  onClick={clearMessages}
+                  className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+            
+            {success && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <p className="text-green-800">{success}</p>
+                <button 
+                  onClick={clearMessages}
+                  className="mt-2 text-sm text-green-600 hover:text-green-800 underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+            
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-white rounded-xl shadow-lg p-6">
                 <h3 className="text-lg font-semibold text-gray-900">Total NFTs</h3>
-                <p className="text-3xl font-bold text-blue-600">{nftOrigins.length}</p>
+                <p className="text-3xl font-bold text-blue-600">{frontendNFTOrigins.length}</p>
               </div>
               <div className="bg-white rounded-xl shadow-lg p-6">
                 <h3 className="text-lg font-semibold text-gray-900">Program Status</h3>
-                <p className={`text-3xl font-bold ${programState?.paused ? 'text-red-600' : 'text-green-600'}`}>
-                  {programState?.paused ? 'Paused' : 'Active'}
+                <p className={`text-3xl font-bold ${frontendProgramState?.paused ? 'text-red-600' : 'text-green-600'}`}>
+                  {frontendProgramState?.paused ? 'Paused' : 'Active'}
                 </p>
               </div>
               <div className="bg-white rounded-xl shadow-lg p-6">
                 <h3 className="text-lg font-semibold text-gray-900">Next Token ID</h3>
-                <p className="text-3xl font-bold text-purple-600">{programState?.nextTokenId || 0}</p>
+                <p className="text-3xl font-bold text-purple-600">{frontendProgramState?.nextTokenId || 0}</p>
               </div>
             </div>
+            
+            {frontendProgramState && (
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Program Details</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-gray-600">Owner</p>
+                    <p className="text-sm font-mono text-gray-900 break-all">{frontendProgramState.owner}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Gateway</p>
+                    <p className="text-sm font-mono text-gray-900 break-all">{frontendProgramState.gateway}</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )
 
@@ -85,34 +246,46 @@ const AppContent: React.FC = () => {
         return (
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Initialize Program</h3>
-            <form className="space-y-4">
+            <form onSubmit={handleInitialize} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Owner Address</label>
                 <input
                   type="text"
+                  value={initializeForm.owner}
+                  onChange={(e) => setInitializeForm({...initializeForm, owner: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Enter owner public key"
+                  required
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Gateway Address</label>
                 <input
                   type="text"
+                  value={initializeForm.gateway}
+                  onChange={(e) => setInitializeForm({...initializeForm, gateway: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Enter gateway public key"
+                  required
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Initial Token ID</label>
                 <input
                   type="number"
+                  value={initializeForm.nextTokenId}
+                  onChange={(e) => setInitializeForm({...initializeForm, nextTokenId: parseInt(e.target.value)})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  defaultValue="1"
                   min="1"
+                  required
                 />
               </div>
-              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg">
-                Initialize Program
+              <button 
+                type="submit" 
+                disabled={loading || !isConnected}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed"
+              >
+                {loading ? 'Initializing...' : 'Initialize Program'}
               </button>
             </form>
           </div>
@@ -122,25 +295,35 @@ const AppContent: React.FC = () => {
         return (
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Mint New NFT</h3>
-            <form className="space-y-4">
+            <form onSubmit={handleMintNFT} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Metadata URI</label>
                 <input
                   type="url"
+                  value={mintForm.uri}
+                  onChange={(e) => setMintForm({...mintForm, uri: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="https://arweave.net/your-metadata"
+                  required
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Mint Address</label>
                 <input
                   type="text"
+                  value={mintForm.mint}
+                  onChange={(e) => setMintForm({...mintForm, mint: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Enter mint public key"
+                  required
                 />
               </div>
-              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg">
-                Mint NFT
+              <button 
+                type="submit" 
+                disabled={loading || !isConnected}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed"
+              >
+                {loading ? 'Minting...' : 'Mint NFT'}
               </button>
             </form>
           </div>
@@ -150,35 +333,46 @@ const AppContent: React.FC = () => {
         return (
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Create NFT Origin Record</h3>
-            <form className="space-y-4">
+            <form onSubmit={handleCreateOrigin} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Token ID</label>
                 <input
                   type="number"
+                  value={createOriginForm.tokenId}
+                  onChange={(e) => setCreateOriginForm({...createOriginForm, tokenId: parseInt(e.target.value)})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  defaultValue="1"
                   min="1"
+                  required
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Origin Chain</label>
                 <input
                   type="number"
+                  value={createOriginForm.originChain}
+                  onChange={(e) => setCreateOriginForm({...createOriginForm, originChain: parseInt(e.target.value)})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  defaultValue="0"
                   min="0"
+                  required
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Metadata URI</label>
                 <input
                   type="url"
+                  value={createOriginForm.metadataUri}
+                  onChange={(e) => setCreateOriginForm({...createOriginForm, metadataUri: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="https://arweave.net/your-metadata"
+                  required
                 />
               </div>
-              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg">
-                Create NFT Origin
+              <button 
+                type="submit" 
+                disabled={loading || !isConnected}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed"
+              >
+                {loading ? 'Creating...' : 'Create NFT Origin'}
               </button>
             </form>
           </div>
@@ -188,27 +382,35 @@ const AppContent: React.FC = () => {
         return (
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Initiate Cross-Chain Transfer</h3>
-            <form className="space-y-4">
+            <form onSubmit={handleTransfer} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Token ID</label>
                 <input
                   type="number"
+                  value={transferForm.tokenId}
+                  onChange={(e) => setTransferForm({...transferForm, tokenId: parseInt(e.target.value)})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  defaultValue="1"
                   min="1"
+                  required
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Destination Chain</label>
                 <input
                   type="number"
+                  value={transferForm.destinationChain}
+                  onChange={(e) => setTransferForm({...transferForm, destinationChain: parseInt(e.target.value)})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  defaultValue="1"
                   min="1"
+                  required
                 />
               </div>
-              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg">
-                Initiate Transfer
+              <button 
+                type="submit" 
+                disabled={loading || !isConnected}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed"
+              >
+                {loading ? 'Initiating...' : 'Initiate Transfer'}
               </button>
             </form>
           </div>
@@ -218,25 +420,34 @@ const AppContent: React.FC = () => {
         return (
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Receive Cross-Chain Message</h3>
-            <form className="space-y-4">
+            <form onSubmit={handleReceive} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Token ID</label>
                 <input
                   type="number"
+                  value={receiveForm.tokenId}
+                  onChange={(e) => setReceiveForm({...receiveForm, tokenId: parseInt(e.target.value)})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  defaultValue="1"
                   min="1"
+                  required
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Cross-Chain Message</label>
                 <textarea
+                  value={receiveForm.message}
+                  onChange={(e) => setReceiveForm({...receiveForm, message: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 h-32 resize-none"
                   placeholder="Enter cross-chain message"
+                  required
                 />
               </div>
-              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg">
-                Receive Message
+              <button 
+                type="submit" 
+                disabled={loading || !isConnected}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed"
+              >
+                {loading ? 'Receiving...' : 'Receive Message'}
               </button>
             </form>
           </div>
@@ -248,11 +459,19 @@ const AppContent: React.FC = () => {
             <div className="bg-white rounded-xl shadow-lg p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Program Control</h3>
               <div className="flex space-x-4">
-                <button className="bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg">
-                  Pause Program
+                <button 
+                  onClick={handlePause}
+                  disabled={loading || !isConnected || frontendProgramState?.paused}
+                  className="bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Pausing...' : 'Pause Program'}
                 </button>
-                <button className="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg">
-                  Unpause Program
+                <button 
+                  onClick={handleUnpause}
+                  disabled={loading || !isConnected || !frontendProgramState?.paused}
+                  className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Unpausing...' : 'Unpause Program'}
                 </button>
               </div>
             </div>
