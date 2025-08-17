@@ -116,20 +116,8 @@ pub mod universal_nft {
     ) -> Result<()> {
         require!(!ctx.accounts.program_state.paused, ErrorCode::ProgramPaused);
         
-        let clock = Clock::get()?;
-        
         // The mint account is automatically initialized by the account constraint above
         // No need to manually initialize it here
-        
-        // Create NFT origin record for the new mint
-        let nft_origin = &mut ctx.accounts.nft_origin;
-        nft_origin.token_id = ctx.accounts.program_state.next_token_id;
-        nft_origin.origin_chain = 0; // 0 for Solana
-        nft_origin.origin_token_id = ctx.accounts.program_state.next_token_id;
-        nft_origin.metadata_uri = "".to_string(); // Will be set when minting
-        nft_origin.mint = ctx.accounts.mint.key();
-        nft_origin.created_at = clock.unix_timestamp;
-        nft_origin.bump = ctx.bumps.nft_origin;
         
         // Increment next token ID
         ctx.accounts.program_state.next_token_id = ctx.accounts.program_state.next_token_id
@@ -140,7 +128,7 @@ pub mod universal_nft {
             mint: ctx.accounts.mint.key(),
             mint_authority: ctx.accounts.mint_authority.key(),
             decimals,
-            token_id: nft_origin.token_id,
+            token_id: ctx.accounts.program_state.next_token_id, // Use the incremented value
         });
         
         Ok(())
@@ -340,7 +328,7 @@ pub struct MintNFT<'info> {
         init,
         payer = payer,
         space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1 + 500,
-        seeds = [b"nft_origin", &[0u8; 10]], // Placeholder seed, will be updated in instruction
+        seeds = [b"nft_origin", &mint.key().to_bytes()[..10]],
         bump
     )]
     pub nft_origin: Account<'info, NFTOrigin>,
@@ -447,22 +435,13 @@ pub struct CreateMint<'info> {
     pub program_state: Account<'info, ProgramState>,
     
     #[account(
-        init,  // Initialize a NEW mint account
+        init,
         payer = mint_authority,
         mint::decimals = decimals,
         mint::authority = mint_authority.key(),
         mint::freeze_authority = mint_authority.key(),
     )]
     pub mint: Account<'info, Mint>,
-    
-    #[account(
-        init,
-        payer = mint_authority,
-        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1 + 500,
-        seeds = [&nft_origin_seed(program_state.next_token_id)],
-        bump
-    )]
-    pub nft_origin: Account<'info, NFTOrigin>,
     
     #[account(mut)]
     pub mint_authority: Signer<'info>,

@@ -101,7 +101,10 @@ export class UniversalNFTClient {
   // Create mint account
   async createMint(decimals: number): Promise<{ signature: string; mintAddress: string }> {
     try {
+      console.log('=== CREATE MINT START ===');
       console.log('Creating mint with decimals:', decimals);
+      console.log('Timestamp:', new Date().toISOString());
+      console.log('Wallet address:', this.wallet.publicKey.toString());
       
       const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
       console.log('Program state PDA:', programStatePDA.toString());
@@ -130,44 +133,49 @@ export class UniversalNFTClient {
       const nextTokenId = safeBNToNumber(programState.nextTokenId);
       console.log('Current program state - next token ID:', nextTokenId);
       
-      // Generate a new mint keypair - THIS IS THE KEY CHANGE
+      // Generate a new mint keypair for each mint creation
       const mintKeypair = web3.Keypair.generate();
       console.log('Generated mint keypair:', mintKeypair.publicKey.toString());
-      
-      // Get the NFT origin PDA for the next token ID
-      const [nftOriginPDA] = UniversalNFTClient.getNFTOriginPDA(nextTokenId);
-      console.log('NFT origin PDA:', nftOriginPDA.toString());
       
       console.log('Calling program.createMint with accounts:', {
         programState: programStatePDA.toString(),
         mint: mintKeypair.publicKey.toString(),
-        nftOrigin: nftOriginPDA.toString(),
         mintAuthority: this.wallet.publicKey.toString(),
         tokenProgram: TOKEN_PROGRAM_ID.toString(),
         systemProgram: web3.SystemProgram.programId.toString(),
+        rent: web3.SYSVAR_RENT_PUBKEY.toString(),
       });
       
       const tx = await this.program.methods
         .createMint(decimals)
         .accounts({
           programState: programStatePDA,
-          mint: mintKeypair.publicKey,  // Use the generated keypair
-          nftOrigin: nftOriginPDA,
+          mint: mintKeypair.publicKey,
           mintAuthority: this.wallet.publicKey,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: web3.SystemProgram.programId,
+          rent: web3.SYSVAR_RENT_PUBKEY,
         })
-        .signers([mintKeypair])  // Include the keypair as a signer
+        .signers([mintKeypair]) // Include the keypair as a signer
         .rpc();
 
       console.log('Transaction successful:', tx);
+      console.log('=== CREATE MINT END ===');
       
       return {
         signature: tx,
         mintAddress: mintKeypair.publicKey.toString()
       };
-    } catch (error) {
+    } catch (error: any) {
+      console.error('=== CREATE MINT ERROR ===');
       console.error('Error creating mint:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        code: error.code,
+        logs: error.logs
+      });
+      console.error('=== CREATE MINT ERROR END ===');
       throw error;
     }
   }
@@ -175,8 +183,31 @@ export class UniversalNFTClient {
   // Mint NFT
   async mintNFT(uri: string, mint: PublicKey, tokenAccount: PublicKey): Promise<string> {
     try {
+      console.log('=== MINT NFT START ===');
+      console.log('Minting NFT with URI:', uri);
+      console.log('Mint address:', mint.toString());
+      console.log('Token account:', tokenAccount.toString());
+      
       const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
-      const [nftOriginPDA] = UniversalNFTClient.getNFTOriginPDAMintNFT(); // Use the correct seed
+      
+      // Generate a unique NFT origin seed to avoid conflicts
+      const nftOriginSeed = Buffer.concat([
+        Buffer.from('nft_origin'),
+        mint.toBuffer().slice(0, 10) // Take only first 10 bytes to match program
+      ]);
+      
+      const [nftOriginPDA] = PublicKey.findProgramAddressSync(
+        [nftOriginSeed],
+        PROGRAM_ID
+      );
+      
+      console.log('Generated unique NFT origin PDA:', nftOriginPDA.toString());
+      console.log('Seed components:', {
+        prefix: 'nft_origin',
+        mint: mint.toString(),
+        seedLength: nftOriginSeed.length,
+        mintBytesUsed: mint.toBuffer().slice(0, 10).toString('hex')
+      });
       
       const tx = await this.program.methods
         .mintNft(uri)
@@ -192,9 +223,20 @@ export class UniversalNFTClient {
         })
         .rpc();
 
+      console.log('NFT minting successful:', tx);
+      console.log('=== MINT NFT END ===');
+      
       return tx;
-    } catch (error) {
+    } catch (error: any) {
+      console.error('=== MINT NFT ERROR ===');
       console.error('Error minting NFT:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        code: error.code,
+        logs: error.logs
+      });
+      console.error('=== MINT NFT ERROR END ===');
       throw error;
     }
   }
