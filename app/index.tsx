@@ -70,23 +70,43 @@ const AppContent: React.FC = () => {
     message: ''
   })
 
+  // Safe conversion function for BN to number
+  const safeBNToNumber = (bn: any): number => {
+    try {
+      return bn.toNumber();
+    } catch (error) {
+      // If toNumber() fails, convert to string first, then to number
+      // This handles cases where the BN is too large
+      const stringValue = bn.toString();
+      const numValue = Number(stringValue);
+      
+      // Check if the conversion was successful
+      if (isNaN(numValue)) {
+        console.warn('Failed to convert BN to number, using 0 as fallback:', stringValue);
+        return 0;
+      }
+      
+      return numValue;
+    }
+  };
+
   // Convert program state to frontend format
   const frontendProgramState: FrontendProgramState | null = programState ? {
     owner: programState.owner.toString(),
     gateway: programState.gateway.toString(),
-    nextTokenId: programState.nextTokenId.toNumber(),
+    nextTokenId: safeBNToNumber(programState.nextTokenId),
     paused: programState.paused,
     bump: programState.bump
   } : null
 
   // Convert NFT origins to frontend format
   const frontendNFTOrigins: FrontendNFTOrigin[] = nftOrigins.map(origin => ({
-    tokenId: origin.tokenId.toNumber(),
+    tokenId: safeBNToNumber(origin.tokenId),
     originChain: origin.originChain,
-    originTokenId: origin.originTokenId.toNumber(),
+    originTokenId: safeBNToNumber(origin.originTokenId),
     metadataUri: origin.metadataUri,
     mint: origin.mint.toString(),
-    createdAt: origin.createdAt.toNumber(),
+    createdAt: safeBNToNumber(origin.createdAt),
     bump: origin.bump
   }))
 
@@ -114,6 +134,8 @@ const AppContent: React.FC = () => {
       const result = await createMint(createMintForm.decimals)
       if (result?.mintAddress) {
         setCreatedMintAddress(result.mintAddress)
+        // Automatically populate the mint form
+        setMintForm(prev => ({ ...prev, mint: result.mintAddress }))
       }
     } catch (err) {
       // Error is already handled by the hook

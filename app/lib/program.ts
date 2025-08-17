@@ -64,6 +64,19 @@ export class UniversalNFTClient {
     return seed;
   }
 
+  // Get NFT origin PDA for mintNFT (with hardcoded seed matching the program)
+  static getNFTOriginPDAMintNFT(): [PublicKey, number] {
+    // Generate the seed that matches the Solana program's mintNFT instruction
+    // The program expects: [b"nft_origin", &[0u8; 10]] - TWO separate seeds
+    const seed1 = Buffer.from('nft_origin'); // "nft_origin" (10 bytes)
+    const seed2 = Buffer.alloc(10).fill(0); // 10 bytes of zeros
+    
+    return PublicKey.findProgramAddressSync(
+      [seed1, seed2], // Pass as TWO separate seeds, not one combined
+      PROGRAM_ID
+    );
+  }
+
   // Initialize the program
   async initialize(gateway: PublicKey, nextTokenId: number): Promise<string> {
     try {
@@ -98,14 +111,31 @@ export class UniversalNFTClient {
       if (!programState) {
         throw new Error('Failed to get program state');
       }
-      console.log('Current program state - next token ID:', programState.nextTokenId.toNumber());
       
-      // Generate a new mint keypair
+      // Safe conversion function for BN to number
+      const safeBNToNumber = (bn: any): number => {
+        try {
+          return bn.toNumber();
+        } catch (error) {
+          const stringValue = bn.toString();
+          const numValue = Number(stringValue);
+          if (isNaN(numValue)) {
+            console.warn('Failed to convert BN to number, using 0 as fallback:', stringValue);
+            return 0;
+          }
+          return numValue;
+        }
+      };
+      
+      const nextTokenId = safeBNToNumber(programState.nextTokenId);
+      console.log('Current program state - next token ID:', nextTokenId);
+      
+      // Generate a new mint keypair - THIS IS THE KEY CHANGE
       const mintKeypair = web3.Keypair.generate();
       console.log('Generated mint keypair:', mintKeypair.publicKey.toString());
       
       // Get the NFT origin PDA for the next token ID
-      const [nftOriginPDA] = UniversalNFTClient.getNFTOriginPDA(programState.nextTokenId.toNumber());
+      const [nftOriginPDA] = UniversalNFTClient.getNFTOriginPDA(nextTokenId);
       console.log('NFT origin PDA:', nftOriginPDA.toString());
       
       console.log('Calling program.createMint with accounts:', {
@@ -121,13 +151,13 @@ export class UniversalNFTClient {
         .createMint(decimals)
         .accounts({
           programState: programStatePDA,
-          mint: mintKeypair.publicKey,
+          mint: mintKeypair.publicKey,  // Use the generated keypair
           nftOrigin: nftOriginPDA,
           mintAuthority: this.wallet.publicKey,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: web3.SystemProgram.programId,
         })
-        .signers([mintKeypair])
+        .signers([mintKeypair])  // Include the keypair as a signer
         .rpc();
 
       console.log('Transaction successful:', tx);
@@ -146,7 +176,7 @@ export class UniversalNFTClient {
   async mintNFT(uri: string, mint: PublicKey, tokenAccount: PublicKey): Promise<string> {
     try {
       const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
-      const [nftOriginPDA] = UniversalNFTClient.getNFTOriginPDA(0); // Placeholder for now
+      const [nftOriginPDA] = UniversalNFTClient.getNFTOriginPDAMintNFT(); // Use the correct seed
       
       const tx = await this.program.methods
         .mintNft(uri)

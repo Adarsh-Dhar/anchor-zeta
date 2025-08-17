@@ -3,6 +3,8 @@ import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
 import { UniversalNFTClient, ProgramState, NFTOrigin } from '../lib/program';
 import { SolanaUtils } from '../lib/utils';
+import * as web3 from '@solana/web3.js';
+import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from '@solana/spl-token';
 
 export const useProgram = () => {
   const { connection } = useConnection();
@@ -39,12 +41,8 @@ export const useProgram = () => {
   }, [wallet.connected, connection]);
 
   // Initialize program
-  const initialize = useCallback(async (
-    owner: string,
-    gateway: string,
-    nextTokenId: number
-  ) => {
-    if (!wallet.connected || !connection) {
+  const initialize = useCallback(async (owner: string, gateway: string, nextTokenId: number) => {
+    if (!wallet.connected || !connection || !wallet.publicKey) {
       throw new Error('Wallet not connected');
     }
 
@@ -58,12 +56,10 @@ export const useProgram = () => {
       setSuccess(null);
       
       const client = new UniversalNFTClient(connection, wallet);
-      const signature = await client.initialize(
-        new PublicKey(gateway),
-        nextTokenId
-      );
+      const signature = await client.initialize(new PublicKey(gateway), nextTokenId);
       
       setSuccess(`Program initialized! Signature: ${signature}`);
+      
       // Reload data after successful transaction
       setTimeout(loadProgramData, 2000);
       
@@ -75,11 +71,11 @@ export const useProgram = () => {
     } finally {
       setLoading(false);
     }
-  }, [wallet.connected, connection, loadProgramData]);
+  }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
 
   // Create mint account
   const createMint = useCallback(async (decimals: number) => {
-    if (!wallet.connected || !connection) {
+    if (!wallet.connected || !connection || !wallet.publicKey) {
       throw new Error('Wallet not connected');
     }
 
@@ -104,14 +100,11 @@ export const useProgram = () => {
     } finally {
       setLoading(false);
     }
-  }, [wallet.connected, connection, loadProgramData]);
+  }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
 
   // Mint NFT
-  const mintNFT = useCallback(async (
-    uri: string,
-    mintAddress: string
-  ) => {
-    if (!wallet.connected || !connection) {
+  const mintNFT = useCallback(async (uri: string, mintAddress: string) => {
+    if (!wallet.connected || !connection || !wallet.publicKey) {
       throw new Error('Wallet not connected');
     }
 
@@ -127,9 +120,27 @@ export const useProgram = () => {
       const client = new UniversalNFTClient(connection, wallet);
       const mint = new PublicKey(mintAddress);
       
-      // For now, using a placeholder token account
-      // In a real implementation, you'd create or get the user's token account
-      const tokenAccount = new PublicKey('11111111111111111111111111111111');
+      // Get the Associated Token Account address for the mint
+      const tokenAccount = await getAssociatedTokenAddress(mint, wallet.publicKey);
+      
+      // Check if the token account already exists
+      const tokenAccountInfo = await connection.getAccountInfo(tokenAccount);
+      
+      if (!tokenAccountInfo) {
+        // Create the Associated Token Account if it doesn't exist
+        console.log('Creating Associated Token Account...');
+        const createATAInstruction = createAssociatedTokenAccountInstruction(
+          wallet.publicKey,
+          tokenAccount,
+          wallet.publicKey,
+          mint
+        );
+        
+        const createATATx = new web3.Transaction().add(createATAInstruction);
+        const signature = await wallet.sendTransaction(createATATx, connection);
+        await connection.confirmTransaction(signature);
+        console.log('Associated Token Account created:', signature);
+      }
       
       const signature = await client.mintNFT(uri, mint, tokenAccount);
       
@@ -146,7 +157,7 @@ export const useProgram = () => {
     } finally {
       setLoading(false);
     }
-  }, [wallet.connected, connection, loadProgramData]);
+  }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
 
   // Create NFT origin
   const createNFTOrigin = useCallback(async (
@@ -156,7 +167,7 @@ export const useProgram = () => {
     metadataUri: string,
     mintAddress: string
   ) => {
-    if (!wallet.connected || !connection) {
+    if (!wallet.connected || !connection || !wallet.publicKey) {
       throw new Error('Wallet not connected');
     }
 
@@ -193,7 +204,7 @@ export const useProgram = () => {
     } finally {
       setLoading(false);
     }
-  }, [wallet.connected, connection, loadProgramData]);
+  }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
 
   // Initiate cross-chain transfer
   const initiateTransfer = useCallback(async (
@@ -201,7 +212,7 @@ export const useProgram = () => {
     destinationChain: number,
     destinationOwner: string
   ) => {
-    if (!wallet.connected || !connection) {
+    if (!wallet.connected || !connection || !wallet.publicKey) {
       throw new Error('Wallet not connected');
     }
 
@@ -234,7 +245,7 @@ export const useProgram = () => {
     } finally {
       setLoading(false);
     }
-  }, [wallet.connected, connection, loadProgramData]);
+  }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
 
   // Receive cross-chain message
   const receiveMessage = useCallback(async (
@@ -242,7 +253,7 @@ export const useProgram = () => {
     message: string,
     mintAddress: string
   ) => {
-    if (!wallet.connected || !connection) {
+    if (!wallet.connected || !connection || !wallet.publicKey) {
       throw new Error('Wallet not connected');
     }
 
@@ -257,7 +268,9 @@ export const useProgram = () => {
       
       const client = new UniversalNFTClient(connection, wallet);
       const mint = new PublicKey(mintAddress);
-      const messageBytes = SolanaUtils.stringToUint8Array(message);
+      
+      // Convert message to Uint8Array (placeholder implementation)
+      const messageBytes = new TextEncoder().encode(message);
       
       const signature = await client.receiveCrossChainMessage(
         tokenId,
@@ -278,11 +291,11 @@ export const useProgram = () => {
     } finally {
       setLoading(false);
     }
-  }, [wallet.connected, connection, loadProgramData]);
+  }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
 
   // Pause program
   const pauseProgram = useCallback(async () => {
-    if (!wallet.connected || !connection) {
+    if (!wallet.connected || !connection || !wallet.publicKey) {
       throw new Error('Wallet not connected');
     }
 
@@ -307,11 +320,11 @@ export const useProgram = () => {
     } finally {
       setLoading(false);
     }
-  }, [wallet.connected, connection, loadProgramData]);
+  }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
 
   // Unpause program
   const unpauseProgram = useCallback(async () => {
-    if (!wallet.connected || !connection) {
+    if (!wallet.connected || !connection || !wallet.publicKey) {
       throw new Error('Wallet not connected');
     }
 
@@ -336,7 +349,7 @@ export const useProgram = () => {
     } finally {
       setLoading(false);
     }
-  }, [wallet.connected, connection, loadProgramData]);
+  }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
 
   // Clear messages
   const clearMessages = useCallback(() => {

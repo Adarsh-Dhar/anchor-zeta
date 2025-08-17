@@ -118,9 +118,8 @@ pub mod universal_nft {
         
         let clock = Clock::get()?;
         
-        // Initialize the mint account with the specified decimals
-        // The mint account is already initialized by the account constraint
-        // We just need to set the decimals and authorities
+        // The mint account is automatically initialized by the account constraint above
+        // No need to manually initialize it here
         
         // Create NFT origin record for the new mint
         let nft_origin = &mut ctx.accounts.nft_origin;
@@ -448,7 +447,7 @@ pub struct CreateMint<'info> {
     pub program_state: Account<'info, ProgramState>,
     
     #[account(
-        init,
+        init,  // Initialize a NEW mint account
         payer = mint_authority,
         mint::decimals = decimals,
         mint::authority = mint_authority.key(),
@@ -470,6 +469,7 @@ pub struct CreateMint<'info> {
     
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
 }
 
 // Data Structures
