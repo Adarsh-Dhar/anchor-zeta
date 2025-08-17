@@ -166,7 +166,7 @@ export const useProgram = () => {
     originTokenId: number,
     metadataUri: string,
     mintAddress: string
-  ) => {
+  ): Promise<string> => {
     if (!wallet.connected || !connection || !wallet.publicKey) {
       throw new Error('Wallet not connected');
     }
@@ -180,8 +180,18 @@ export const useProgram = () => {
       setError(null);
       setSuccess(null);
       
+      console.log('useProgram: Creating NFT origin with params:', {
+        tokenId,
+        originChain,
+        originTokenId,
+        metadataUri,
+        mintAddress
+      });
+      
       const client = new UniversalNFTClient(connection, wallet);
       const mint = new PublicKey(mintAddress);
+      
+      console.log('useProgram: Created client and mint PublicKey:', mint.toString());
       
       const signature = await client.createNFTOrigin(
         tokenId,
@@ -191,6 +201,7 @@ export const useProgram = () => {
         mint
       );
       
+      console.log('useProgram: NFT origin created successfully:', signature);
       setSuccess(`NFT origin created! Signature: ${signature}`);
       
       // Reload data after successful transaction
@@ -198,6 +209,7 @@ export const useProgram = () => {
       
       return signature;
     } catch (err: any) {
+      console.error('useProgram: Error creating NFT origin:', err);
       const errorMessage = err.message || 'Failed to create NFT origin';
       setError(errorMessage);
       throw new Error(errorMessage);
@@ -223,8 +235,8 @@ export const useProgram = () => {
       
       const client = new UniversalNFTClient(connection, wallet);
       
-      // Convert destination owner to Uint8Array (placeholder implementation)
-      const destinationOwnerBytes = new Uint8Array(32);
+      // Convert destination owner string to Uint8Array
+      const destinationOwnerBytes = new TextEncoder().encode(destinationOwner);
       
       const signature = await client.initiateCrossChainTransfer(
         tokenId,

@@ -6,6 +6,33 @@ use std::str::FromStr;
 
 declare_id!("C2jwo1xMeUzb2Pb4xHU72yi4HrSzDdTZKXxtaJH6M5NX");
 
+// ZetaChain Testnet Chain ID Constants
+pub const CHAIN_ID_SOLANA_DEVNET: u64 = 901;
+pub const CHAIN_ID_ZETACHAIN_TESTNET: u64 = 7001;
+pub const CHAIN_ID_ETHEREUM_SEPOLIA: u64 = 11155111;
+pub const CHAIN_ID_BSC_TESTNET: u64 = 97;
+pub const CHAIN_ID_POLYGON_AMOY: u64 = 80002;
+pub const CHAIN_ID_ARBITRUM_SEPOLIA: u64 = 421614;
+pub const CHAIN_ID_BITCOIN_TESTNET: u64 = 18332;
+
+// Legacy chain ID for backward compatibility (Solana mainnet)
+pub const CHAIN_ID_SOLANA: u64 = 0;
+
+// Chain name mapping function
+pub fn get_chain_name(chain_id: u64) -> &'static str {
+    match chain_id {
+        CHAIN_ID_SOLANA_DEVNET => "Solana Devnet",
+        CHAIN_ID_ZETACHAIN_TESTNET => "ZetaChain Testnet (Athens)",
+        CHAIN_ID_ETHEREUM_SEPOLIA => "Ethereum Sepolia Testnet",
+        CHAIN_ID_BSC_TESTNET => "BSC Testnet",
+        CHAIN_ID_POLYGON_AMOY => "Polygon Amoy Testnet",
+        CHAIN_ID_ARBITRUM_SEPOLIA => "Arbitrum Sepolia Testnet",
+        CHAIN_ID_BITCOIN_TESTNET => "Bitcoin Testnet",
+        CHAIN_ID_SOLANA => "Solana Mainnet",
+        _ => "Unknown Chain"
+    }
+}
+
 // Helper function to generate NFT origin seed
 fn nft_origin_seed(token_id: u64) -> Vec<u8> {
     let mut seed = Vec::new();
@@ -93,7 +120,7 @@ pub mod universal_nft {
         // Create NFT origin record
         let nft_origin = &mut ctx.accounts.nft_origin;
         nft_origin.token_id = token_id;
-        nft_origin.origin_chain = 0; // 0 for Solana
+        nft_origin.origin_chain = CHAIN_ID_SOLANA_DEVNET; // Use constant for Solana Devnet
         nft_origin.origin_token_id = token_id;
         nft_origin.metadata_uri = uri.clone();
         nft_origin.mint = ctx.accounts.mint.key();
@@ -138,7 +165,7 @@ pub mod universal_nft {
     pub fn create_nft_origin(
         ctx: Context<CreateNFTOrigin>,
         _token_id: u64,
-        origin_chain: u16,
+        origin_chain: u64,
         origin_token_id: u64,
         metadata_uri: String,
     ) -> Result<()> {
@@ -168,7 +195,7 @@ pub mod universal_nft {
     pub fn initiate_cross_chain_transfer(
         ctx: Context<CrossChainTransfer>,
         _token_id: u64,
-        destination_chain: u16,
+        destination_chain: u64,
         destination_owner: [u8; 32],
     ) -> Result<()> {
         require!(!ctx.accounts.program_state.paused, ErrorCode::ProgramPaused);
@@ -291,7 +318,7 @@ pub struct ProgramState {
 #[account]
 pub struct NFTOrigin {
     pub token_id: u64,
-    pub origin_chain: u16,
+    pub origin_chain: u64,
     pub origin_token_id: u64,
     pub metadata_uri: String,
     pub mint: Pubkey,
@@ -455,7 +482,7 @@ pub struct CreateMint<'info> {
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct CrossChainMessage {
     pub token_id: u64,
-    pub origin_chain: u16,
+    pub origin_chain: u64,
     pub origin_token_id: u64,
     pub metadata_uri: String,
     pub recipient: [u8; 32],
@@ -472,7 +499,7 @@ pub struct ProgramInitialized {
 #[event]
 pub struct NFTOriginCreated {
     pub token_id: u64,
-    pub origin_chain: u16,
+    pub origin_chain: u64,
     pub origin_token_id: u64,
     pub mint: Pubkey,
     pub metadata_uri: String,
@@ -488,7 +515,7 @@ pub struct NFTMinted {
 #[event]
 pub struct CrossChainTransferInitiated {
     pub token_id: u64,
-    pub destination_chain: u16,
+    pub destination_chain: u64,
     pub destination_owner: [u8; 32],
     pub mint: Pubkey,
 }
@@ -496,7 +523,7 @@ pub struct CrossChainTransferInitiated {
 #[event]
 pub struct CrossChainMessageReceived {
     pub token_id: u64,
-    pub origin_chain: u16,
+    pub origin_chain: u64,
     pub mint: Pubkey,
     pub recipient: Pubkey,
 }

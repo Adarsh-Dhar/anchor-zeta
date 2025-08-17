@@ -3,22 +3,23 @@ import { SolanaProvider } from './components/SolanaProvider'
 import { WalletConnect } from './components/WalletConnect'
 import { useProgram } from './hooks/useProgram'
 
+// Frontend interfaces for display
 interface FrontendProgramState {
-  owner: string
-  gateway: string
-  nextTokenId: number
-  paused: boolean
-  bump: number
+  owner: string;
+  gateway: string;
+  nextTokenId: number | string;
+  paused: boolean;
+  bump: number;
 }
 
 interface FrontendNFTOrigin {
-  tokenId: number
-  originChain: number
-  originTokenId: number
-  metadataUri: string
-  mint: string
-  createdAt: number
-  bump: number
+  tokenId: number | string;
+  originChain: number;
+  originTokenId: number | string;
+  metadataUri: string;
+  mint: string;
+  createdAt: number | string;
+  bump: number;
 }
 
 const AppContent: React.FC = () => {
@@ -58,37 +59,78 @@ const AppContent: React.FC = () => {
   const [createdMintAddress, setCreatedMintAddress] = useState<string | null>(null)
   const [createOriginForm, setCreateOriginForm] = useState({
     tokenId: 1,
-    originChain: 0,
-    metadataUri: ''
+    originChain: 901, // Default to Solana Devnet
+    metadataUri: '',
+    mint: ''
   })
   const [transferForm, setTransferForm] = useState({
     tokenId: 1,
-    destinationChain: 1
+    destinationChain: 7001, // Default to ZetaChain Testnet
+    destinationOwner: ''
   })
   const [receiveForm, setReceiveForm] = useState({
     tokenId: 1,
-    message: ''
+    message: '',
+    mint: ''
   })
 
-  // Safe conversion function for BN to number
-  const safeBNToNumber = (bn: any): number => {
+  // Safe conversion function for BN to number or string
+  const safeBNToNumber = (bn: any): number | string => {
+    if (!bn) return 0;
+    
     try {
-      return bn.toNumber();
-    } catch (error) {
-      // If toNumber() fails, convert to string first, then to number
-      // This handles cases where the BN is too large
-      const stringValue = bn.toString();
+      // Handle BN objects
+      if (bn.toNumber && typeof bn.toNumber === 'function') {
+        try {
+          // Try to convert to number first
+          return bn.toNumber();
+        } catch (error) {
+          // If toNumber fails due to size, return string representation
+          if (error instanceof Error && error.message && error.message.includes('53 bits')) {
+            return bn.toString();
+          }
+          throw error;
+        }
+      }
+      
+      // Handle regular numbers
+      if (typeof bn === 'number') {
+        return bn;
+      }
+      
+      // Handle strings
+      if (typeof bn === 'string') {
+        const numValue = Number(bn);
+        return isNaN(numValue) ? bn : numValue;
+      }
+      
+      // Handle other types by converting to string first
+      const stringValue = String(bn);
       const numValue = Number(stringValue);
       
       // Check if the conversion was successful
       if (isNaN(numValue)) {
-        console.warn('Failed to convert BN to number, using 0 as fallback:', stringValue);
-        return 0;
+        console.warn('Failed to convert value to number, using string as fallback:', bn, stringValue);
+        return stringValue;
       }
       
       return numValue;
+    } catch (error) {
+      console.warn('Error converting BN to number, using string as fallback:', error, bn);
+      return String(bn);
     }
   };
+
+  // Helper function to get chain options
+  const getChainOptions = () => [
+    { value: 901, label: 'Solana Devnet (901)' },
+    { value: 7001, label: 'ZetaChain Testnet (7001)' },
+    { value: 11155111, label: 'Ethereum Sepolia (11155111)' },
+    { value: 97, label: 'BSC Testnet (97)' },
+    { value: 80002, label: 'Polygon Amoy (80002)' },
+    { value: 421614, label: 'Arbitrum Sepolia (421614)' },
+    { value: 18332, label: 'Bitcoin Testnet (18332)' },
+  ];
 
   // Convert program state to frontend format
   const frontendProgramState: FrontendProgramState | null = programState ? {
@@ -112,6 +154,23 @@ const AppContent: React.FC = () => {
 
   const handleInitialize = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Validate inputs
+    if (!initializeForm.owner.trim()) {
+      alert('Please enter an owner address');
+      return;
+    }
+    
+    if (!initializeForm.gateway.trim()) {
+      alert('Please enter a gateway address');
+      return;
+    }
+    
+    if (!initializeForm.nextTokenId || isNaN(initializeForm.nextTokenId)) {
+      alert('Please enter a valid next token ID');
+      return;
+    }
+    
     try {
       await initialize(initializeForm.owner, initializeForm.gateway, initializeForm.nextTokenId)
     } catch (err) {
@@ -121,6 +180,18 @@ const AppContent: React.FC = () => {
 
   const handleMintNFT = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Validate inputs
+    if (!mintForm.uri.trim()) {
+      alert('Please enter a metadata URI');
+      return;
+    }
+    
+    if (!mintForm.mint.trim()) {
+      alert('Please enter a mint address');
+      return;
+    }
+    
     try {
       await mintNFT(mintForm.uri, mintForm.mint)
     } catch (err) {
@@ -130,6 +201,18 @@ const AppContent: React.FC = () => {
 
   const handleCreateMint = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Validate inputs
+    if (createMintForm.decimals === undefined || isNaN(createMintForm.decimals)) {
+      alert('Please enter a valid number of decimals');
+      return;
+    }
+    
+    if (createMintForm.decimals < 0 || createMintForm.decimals > 9) {
+      alert('Decimals must be between 0 and 9');
+      return;
+    }
+    
     try {
       const result = await createMint(createMintForm.decimals)
       if (result?.mintAddress) {
@@ -144,23 +227,66 @@ const AppContent: React.FC = () => {
 
   const handleCreateOrigin = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Validate inputs
+    if (!createOriginForm.tokenId || isNaN(createOriginForm.tokenId)) {
+      alert('Please enter a valid token ID');
+      return;
+    }
+    
+    if (!createOriginForm.originChain || isNaN(createOriginForm.originChain)) {
+      alert('Please enter a valid origin chain');
+      return;
+    }
+    
+    if (!createOriginForm.metadataUri.trim()) {
+      alert('Please enter a metadata URI');
+      return;
+    }
+    
+    if (!createOriginForm.mint.trim()) {
+      alert('Please enter a valid mint address');
+      return;
+    }
+    
+    console.log('Creating NFT origin with form data:', createOriginForm);
+    
     try {
-      await createNFTOrigin(
+      const result = await createNFTOrigin(
         createOriginForm.tokenId,
         createOriginForm.originChain,
         createOriginForm.tokenId,
         createOriginForm.metadataUri,
-        '11111111111111111111111111111111' // Placeholder mint
+        createOriginForm.mint
       )
+      console.log('NFT origin created successfully:', result);
     } catch (err) {
+      console.error('Error in handleCreateOrigin:', err);
       // Error is already handled by the hook
     }
   }
 
   const handleTransfer = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Validate inputs
+    if (!transferForm.tokenId || isNaN(transferForm.tokenId)) {
+      alert('Please enter a valid token ID');
+      return;
+    }
+    
+    if (!transferForm.destinationChain || isNaN(transferForm.destinationChain)) {
+      alert('Please enter a valid destination chain');
+      return;
+    }
+    
+    if (!transferForm.destinationOwner.trim()) {
+      alert('Please enter a destination owner');
+      return;
+    }
+    
     try {
-      await initiateTransfer(transferForm.tokenId, transferForm.destinationChain, transferForm.destinationChain as unknown as string)
+      await initiateTransfer(transferForm.tokenId, transferForm.destinationChain, transferForm.destinationOwner)
     } catch (err) {
       // Error is already handled by the hook
     }
@@ -168,11 +294,28 @@ const AppContent: React.FC = () => {
 
   const handleReceive = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Validate inputs
+    if (!receiveForm.tokenId || isNaN(receiveForm.tokenId)) {
+      alert('Please enter a valid token ID');
+      return;
+    }
+    
+    if (!receiveForm.message.trim()) {
+      alert('Please enter a message');
+      return;
+    }
+    
+    if (!receiveForm.mint.trim()) {
+      alert('Please enter a mint address');
+      return;
+    }
+    
     try {
       await receiveMessage(
         receiveForm.tokenId,
         receiveForm.message,
-        '11111111111111111111111111111111' // Placeholder mint
+        receiveForm.mint
       )
     } catch (err) {
       // Error is already handled by the hook
@@ -279,6 +422,18 @@ const AppContent: React.FC = () => {
                 </div>
               </div>
             )}
+            
+            <div className="bg-white rounded-xl shadow-lg p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Supported Chain IDs</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {getChainOptions().map(option => (
+                  <div key={option.value} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <span className="text-sm font-medium text-gray-700">{option.label}</span>
+                    <span className="text-xs text-gray-500 font-mono">{option.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )
 
@@ -286,35 +441,52 @@ const AppContent: React.FC = () => {
         return (
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Initialize Program</h3>
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ Program initialization:</h4>
+              <ul className="text-sm text-blue-700 space-y-1">
+                <li>• This can only be done once</li>
+                <li>• You need sufficient SOL for transaction fees</li>
+                <li>• The owner address will have admin privileges</li>
+                <li>• The gateway address should be a valid program</li>
+              </ul>
+            </div>
             <form onSubmit={handleInitialize} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Owner Address</label>
+                <p className="text-sm text-gray-500 mb-2">Public key of the program owner/admin</p>
                 <input
                   type="text"
                   value={initializeForm.owner}
                   onChange={(e) => setInitializeForm({...initializeForm, owner: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter owner public key"
+                  placeholder="e.g., F79VcAwM6VhL9CaZo68W1SwrkntLJpAhcbTLLzuz4g3G"
                   required
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Gateway Address</label>
+                <p className="text-sm text-gray-500 mb-2">Public key of the cross-chain gateway program</p>
                 <input
                   type="text"
                   value={initializeForm.gateway}
                   onChange={(e) => setInitializeForm({...initializeForm, gateway: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter gateway public key"
+                  placeholder="e.g., Gateway program public key"
                   required
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Initial Token ID</label>
+                <p className="text-sm text-gray-500 mb-2">Starting token ID for the program (typically 1)</p>
                 <input
                   type="number"
                   value={initializeForm.nextTokenId}
-                  onChange={(e) => setInitializeForm({...initializeForm, nextTokenId: parseInt(e.target.value)})}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value);
+                    if (!isNaN(value)) {
+                      setInitializeForm({...initializeForm, nextTokenId: value});
+                    }
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   min="1"
                   required
@@ -336,8 +508,17 @@ const AppContent: React.FC = () => {
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Create Mint Account</h3>
             <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <h4 className="text-sm font-medium text-blue-800 mb-2">What happens when you create a mint?</h4>
+              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ Before creating a mint:</h4>
               <ul className="text-sm text-blue-700 space-y-1">
+                <li>• Make sure the program is initialized</li>
+                <li>• The program must not be paused</li>
+                <li>• You need sufficient SOL for transaction fees</li>
+                <li>• For NFTs, typically use 0 decimals</li>
+              </ul>
+            </div>
+            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+              <h4 className="text-sm font-medium text-green-800 mb-2">What happens when you create a mint?</h4>
+              <ul className="text-sm text-green-700 space-y-1">
                 <li>• A new SPL Token mint account is created with the specified decimals</li>
                 <li>• You become the mint authority and freeze authority</li>
                 <li>• An NFT origin record is automatically created</li>
@@ -350,7 +531,12 @@ const AppContent: React.FC = () => {
                 <input
                   type="number"
                   value={createMintForm.decimals}
-                  onChange={(e) => setCreateMintForm({...createMintForm, decimals: parseInt(e.target.value)})}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value);
+                    if (!isNaN(value)) {
+                      setCreateMintForm({...createMintForm, decimals: value});
+                    }
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   min="0"
                   max="9"
@@ -399,26 +585,37 @@ const AppContent: React.FC = () => {
         return (
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Mint New NFT</h3>
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ Before minting an NFT:</h4>
+              <ul className="text-sm text-blue-700 space-y-1">
+                <li>• Make sure the program is initialized</li>
+                <li>• Ensure you have a valid mint address</li>
+                <li>• The program must not be paused</li>
+                <li>• You need sufficient SOL for transaction fees</li>
+              </ul>
+            </div>
             <form onSubmit={handleMintNFT} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Metadata URI</label>
+                <p className="text-sm text-gray-500 mb-2">URI pointing to the NFT metadata (JSON format)</p>
                 <input
                   type="url"
                   value={mintForm.uri}
                   onChange={(e) => setMintForm({...mintForm, uri: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="https://arweave.net/your-metadata"
+                  placeholder="https://arweave.net/your-metadata or ipfs://your-hash"
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Mint Address</label>
+                <label className="block text-gray-700 mb-2">Mint Address</label>
+                <p className="text-sm text-gray-500 mb-2">Public key of the SPL Token mint account to mint the NFT to</p>
                 <input
                   type="text"
                   value={mintForm.mint}
                   onChange={(e) => setMintForm({...mintForm, mint: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter mint public key"
+                  placeholder="e.g., 11111111111111111111111111111111"
                   required
                 />
               </div>
@@ -437,13 +634,28 @@ const AppContent: React.FC = () => {
         return (
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Create NFT Origin Record</h3>
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ Before creating an NFT origin:</h4>
+              <ul className="text-sm text-blue-700 space-y-1">
+                <li>• Make sure the program is initialized</li>
+                <li>• Ensure you have a valid mint address</li>
+                <li>• The program must not be paused</li>
+                <li>• You need sufficient SOL for transaction fees</li>
+              </ul>
+            </div>
             <form onSubmit={handleCreateOrigin} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Token ID</label>
+                <p className="text-sm text-gray-500 mb-2">Unique identifier for the NFT (must be greater than 0)</p>
                 <input
                   type="number"
                   value={createOriginForm.tokenId}
-                  onChange={(e) => setCreateOriginForm({...createOriginForm, tokenId: parseInt(e.target.value)})}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value);
+                    if (!isNaN(value)) {
+                      setCreateOriginForm({...createOriginForm, tokenId: value});
+                    }
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   min="1"
                   required
@@ -451,23 +663,46 @@ const AppContent: React.FC = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Origin Chain</label>
-                <input
-                  type="number"
+                <p className="text-sm text-gray-500 mb-2">Select the blockchain where the NFT originated</p>
+                <select
                   value={createOriginForm.originChain}
-                  onChange={(e) => setCreateOriginForm({...createOriginForm, originChain: parseInt(e.target.value)})}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value);
+                    if (!isNaN(value)) {
+                      setCreateOriginForm({...createOriginForm, originChain: value});
+                    }
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  min="0"
                   required
-                />
+                >
+                  {getChainOptions().map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Metadata URI</label>
+                <p className="text-sm text-gray-500 mb-2">URI pointing to the NFT metadata (JSON format)</p>
                 <input
                   type="url"
                   value={createOriginForm.metadataUri}
                   onChange={(e) => setCreateOriginForm({...createOriginForm, metadataUri: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="https://arweave.net/your-metadata"
+                  placeholder="https://arweave.net/your-metadata or ipfs://your-hash"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Mint Address</label>
+                <p className="text-sm text-gray-500 mb-2">Public key of the SPL Token mint account</p>
+                <input
+                  type="text"
+                  value={createOriginForm.mint}
+                  onChange={(e) => setCreateOriginForm({...createOriginForm, mint: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g., 11111111111111111111111111111111"
                   required
                 />
               </div>
@@ -486,13 +721,27 @@ const AppContent: React.FC = () => {
         return (
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Initiate Cross-Chain Transfer</h3>
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ Before initiating a transfer:</h4>
+              <ul className="text-sm text-blue-700 space-y-1">
+                <li>• Make sure the NFT origin exists</li>
+                <li>• Ensure you own the NFT tokens</li>
+                <li>• The program must not be paused</li>
+                <li>• You need sufficient SOL for transaction fees</li>
+              </ul>
+            </div>
             <form onSubmit={handleTransfer} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Token ID</label>
                 <input
                   type="number"
                   value={transferForm.tokenId}
-                  onChange={(e) => setTransferForm({...transferForm, tokenId: parseInt(e.target.value)})}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value);
+                    if (!isNaN(value)) {
+                      setTransferForm({...transferForm, tokenId: value});
+                    }
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   min="1"
                   required
@@ -500,12 +749,34 @@ const AppContent: React.FC = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Destination Chain</label>
-                <input
-                  type="number"
+                <p className="text-sm text-gray-500 mb-2">Select the target blockchain for the transfer</p>
+                <select
                   value={transferForm.destinationChain}
-                  onChange={(e) => setTransferForm({...transferForm, destinationChain: parseInt(e.target.value)})}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value);
+                    if (!isNaN(value)) {
+                      setTransferForm({...transferForm, destinationChain: value});
+                    }
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  min="1"
+                  required
+                >
+                  {getChainOptions().map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Destination Owner</label>
+                <p className="text-sm text-gray-500 mb-2">Address of the recipient on the destination chain</p>
+                <input
+                  type="text"
+                  value={transferForm.destinationOwner}
+                  onChange={(e) => setTransferForm({...transferForm, destinationOwner: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g., destination_wallet_address"
                   required
                 />
               </div>
@@ -524,13 +795,27 @@ const AppContent: React.FC = () => {
         return (
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Receive Cross-Chain Message</h3>
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ Before receiving a message:</h4>
+              <ul className="text-sm text-blue-700 space-y-1">
+                <li>• Make sure the program is initialized</li>
+                <li>• Ensure you have a valid mint address</li>
+                <li>• The program must not be paused</li>
+                <li>• You need sufficient SOL for transaction fees</li>
+              </ul>
+            </div>
             <form onSubmit={handleReceive} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Token ID</label>
                 <input
                   type="number"
                   value={receiveForm.tokenId}
-                  onChange={(e) => setReceiveForm({...receiveForm, tokenId: parseInt(e.target.value)})}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value);
+                    if (!isNaN(value)) {
+                      setReceiveForm({...receiveForm, tokenId: value});
+                    }
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   min="1"
                   required
@@ -538,11 +823,24 @@ const AppContent: React.FC = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Cross-Chain Message</label>
+                <p className="text-sm text-gray-500 mb-2">Message data received from another blockchain</p>
                 <textarea
                   value={receiveForm.message}
                   onChange={(e) => setReceiveForm({...receiveForm, message: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 h-32 resize-none"
-                  placeholder="Enter cross-chain message"
+                  placeholder="Enter cross-chain message (JSON format recommended)"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Mint Address</label>
+                <p className="text-sm text-gray-500 mb-2">Public key of the SPL Token mint account to receive the NFT</p>
+                <input
+                  type="text"
+                  value={receiveForm.mint}
+                  onChange={(e) => setReceiveForm({...receiveForm, mint: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g., 11111111111111111111111111111111"
                   required
                 />
               </div>
