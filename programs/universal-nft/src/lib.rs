@@ -108,6 +108,44 @@ pub mod universal_nft {
         Ok(())
     }
 
+    /// Create a new mint for NFT
+    pub fn create_mint(
+        ctx: Context<CreateMint>,
+        decimals: u8,
+    ) -> Result<()> {
+        require!(!ctx.accounts.program_state.paused, ErrorCode::ProgramPaused);
+        
+        let clock = Clock::get()?;
+        
+        // Initialize the mint account with the specified decimals
+        // The mint account is already initialized by the account constraint
+        // We just need to set the decimals and authorities
+        
+        // Create NFT origin record for the new mint
+        let nft_origin = &mut ctx.accounts.nft_origin;
+        nft_origin.token_id = ctx.accounts.program_state.next_token_id;
+        nft_origin.origin_chain = 0; // 0 for Solana
+        nft_origin.origin_token_id = ctx.accounts.program_state.next_token_id;
+        nft_origin.metadata_uri = "".to_string(); // Will be set when minting
+        nft_origin.mint = ctx.accounts.mint.key();
+        nft_origin.created_at = clock.unix_timestamp;
+        nft_origin.bump = ctx.bumps.nft_origin;
+        
+        // Increment next token ID
+        ctx.accounts.program_state.next_token_id = ctx.accounts.program_state.next_token_id
+            .checked_add(1)
+            .ok_or(ErrorCode::TokenIdOverflow)?;
+        
+        emit!(MintCreated {
+            mint: ctx.accounts.mint.key(),
+            mint_authority: ctx.accounts.mint_authority.key(),
+            decimals,
+            token_id: nft_origin.token_id,
+        });
+        
+        Ok(())
+    }
+
     /// Create a new NFT origin record
     pub fn create_nft_origin(
         ctx: Context<CreateNFTOrigin>,
@@ -398,6 +436,41 @@ pub struct AdminAction<'info> {
     pub admin: Signer<'info>,
 }
 
+#[derive(Accounts)]
+#[instruction(decimals: u8)]
+pub struct CreateMint<'info> {
+    #[account(
+        mut,
+        seeds = [b"test_program_state"],
+        bump = program_state.bump
+    )]
+    pub program_state: Account<'info, ProgramState>,
+    
+    #[account(
+        init,
+        payer = mint_authority,
+        mint::decimals = decimals,
+        mint::authority = mint_authority.key(),
+        mint::freeze_authority = mint_authority.key(),
+    )]
+    pub mint: Account<'info, Mint>,
+    
+    #[account(
+        init,
+        payer = mint_authority,
+        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1 + 500,
+        seeds = [&nft_origin_seed(program_state.next_token_id)],
+        bump
+    )]
+    pub nft_origin: Account<'info, NFTOrigin>,
+    
+    #[account(mut)]
+    pub mint_authority: Signer<'info>,
+    
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
 // Data Structures
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct CrossChainMessage {
@@ -456,6 +529,14 @@ pub struct ProgramPaused {
 #[event]
 pub struct ProgramUnpaused {
     pub admin: Pubkey,
+}
+
+#[event]
+pub struct MintCreated {
+    pub mint: Pubkey,
+    pub mint_authority: Pubkey,
+    pub decimals: u8,
+    pub token_id: u64,
 }
 
 // Error Codes

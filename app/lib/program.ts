@@ -85,6 +85,63 @@ export class UniversalNFTClient {
     }
   }
 
+  // Create mint account
+  async createMint(decimals: number): Promise<{ signature: string; mintAddress: string }> {
+    try {
+      console.log('Creating mint with decimals:', decimals);
+      
+      const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
+      console.log('Program state PDA:', programStatePDA.toString());
+      
+      // Get current program state to know the next token ID
+      const programState = await this.getProgramState();
+      if (!programState) {
+        throw new Error('Failed to get program state');
+      }
+      console.log('Current program state - next token ID:', programState.nextTokenId.toNumber());
+      
+      // Generate a new mint keypair
+      const mintKeypair = web3.Keypair.generate();
+      console.log('Generated mint keypair:', mintKeypair.publicKey.toString());
+      
+      // Get the NFT origin PDA for the next token ID
+      const [nftOriginPDA] = UniversalNFTClient.getNFTOriginPDA(programState.nextTokenId.toNumber());
+      console.log('NFT origin PDA:', nftOriginPDA.toString());
+      
+      console.log('Calling program.createMint with accounts:', {
+        programState: programStatePDA.toString(),
+        mint: mintKeypair.publicKey.toString(),
+        nftOrigin: nftOriginPDA.toString(),
+        mintAuthority: this.wallet.publicKey.toString(),
+        tokenProgram: TOKEN_PROGRAM_ID.toString(),
+        systemProgram: web3.SystemProgram.programId.toString(),
+      });
+      
+      const tx = await this.program.methods
+        .createMint(decimals)
+        .accounts({
+          programState: programStatePDA,
+          mint: mintKeypair.publicKey,
+          nftOrigin: nftOriginPDA,
+          mintAuthority: this.wallet.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: web3.SystemProgram.programId,
+        })
+        .signers([mintKeypair])
+        .rpc();
+
+      console.log('Transaction successful:', tx);
+      
+      return {
+        signature: tx,
+        mintAddress: mintKeypair.publicKey.toString()
+      };
+    } catch (error) {
+      console.error('Error creating mint:', error);
+      throw error;
+    }
+  }
+
   // Mint NFT
   async mintNFT(uri: string, mint: PublicKey, tokenAccount: PublicKey): Promise<string> {
     try {

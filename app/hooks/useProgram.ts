@@ -79,6 +79,35 @@ export const useProgram = () => {
     }
   }, [wallet.connected, connection, loadProgramData]);
 
+  // Create mint account
+  const createMint = useCallback(async (decimals: number) => {
+    if (!wallet.connected || !connection) {
+      throw new Error('Wallet not connected');
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      setSuccess(null);
+      
+      const client = new UniversalNFTClient(connection, wallet);
+      const { signature, mintAddress } = await client.createMint(decimals);
+      
+      setSuccess(`Mint account created! Address: ${mintAddress} | Signature: ${signature}`);
+      
+      // Reload data after successful transaction
+      setTimeout(loadProgramData, 2000);
+      
+      return { signature, mintAddress };
+    } catch (err: any) {
+      const errorMessage = err.message || 'Failed to create mint account';
+      setError(errorMessage);
+      throw new Error(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet.connected, connection, loadProgramData]);
+
   // Mint NFT
   const mintNFT = useCallback(async (
     uri: string,
@@ -171,7 +200,8 @@ export const useProgram = () => {
   // Initiate cross-chain transfer
   const initiateTransfer = useCallback(async (
     tokenId: number,
-    destinationChain: number
+    destinationChain: number,
+    destinationOwner: string
   ) => {
     if (!wallet.connected || !connection) {
       throw new Error('Wallet not connected');
@@ -333,6 +363,7 @@ export const useProgram = () => {
     
     // Actions
     initialize,
+    createMint,
     mintNFT,
     createNFTOrigin,
     initiateTransfer,

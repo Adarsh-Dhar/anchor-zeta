@@ -29,6 +29,7 @@ const AppContent: React.FC = () => {
     error,
     success,
     initialize,
+    createMint,
     mintNFT,
     createNFTOrigin,
     initiateTransfer,
@@ -51,6 +52,10 @@ const AppContent: React.FC = () => {
     uri: '',
     mint: ''
   })
+  const [createMintForm, setCreateMintForm] = useState({
+    decimals: 0
+  })
+  const [createdMintAddress, setCreatedMintAddress] = useState<string | null>(null)
   const [createOriginForm, setCreateOriginForm] = useState({
     tokenId: 1,
     originChain: 0,
@@ -103,6 +108,18 @@ const AppContent: React.FC = () => {
     }
   }
 
+  const handleCreateMint = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      const result = await createMint(createMintForm.decimals)
+      if (result?.mintAddress) {
+        setCreatedMintAddress(result.mintAddress)
+      }
+    } catch (err) {
+      // Error is already handled by the hook
+    }
+  }
+
   const handleCreateOrigin = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
@@ -121,7 +138,7 @@ const AppContent: React.FC = () => {
   const handleTransfer = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await initiateTransfer(transferForm.tokenId, transferForm.destinationChain)
+      await initiateTransfer(transferForm.tokenId, transferForm.destinationChain, transferForm.destinationChain as unknown as string)
     } catch (err) {
       // Error is already handled by the hook
     }
@@ -159,6 +176,7 @@ const AppContent: React.FC = () => {
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'initialize', label: 'Initialize' },
+    { id: 'create-mint', label: 'Create Mint' },
     { id: 'mint', label: 'Mint NFT' },
     { id: 'create-origin', label: 'Create Origin' },
     { id: 'transfer', label: 'Cross-Chain Transfer' },
@@ -288,6 +306,70 @@ const AppContent: React.FC = () => {
                 {loading ? 'Initializing...' : 'Initialize Program'}
               </button>
             </form>
+          </div>
+        )
+
+      case 'create-mint':
+        return (
+          <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Create Mint Account</h3>
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h4 className="text-sm font-medium text-blue-800 mb-2">What happens when you create a mint?</h4>
+              <ul className="text-sm text-blue-700 space-y-1">
+                <li>• A new SPL Token mint account is created with the specified decimals</li>
+                <li>• You become the mint authority and freeze authority</li>
+                <li>• An NFT origin record is automatically created</li>
+                <li>• The mint address will be displayed after successful creation</li>
+              </ul>
+            </div>
+            <form onSubmit={handleCreateMint} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Decimals</label>
+                <input
+                  type="number"
+                  value={createMintForm.decimals}
+                  onChange={(e) => setCreateMintForm({...createMintForm, decimals: parseInt(e.target.value)})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  min="0"
+                  max="9"
+                  required
+                />
+                <p className="text-sm text-gray-500 mt-1">For NFTs, typically use 0 decimals</p>
+              </div>
+              <button 
+                type="submit" 
+                disabled={loading || !isConnected}
+                className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed"
+              >
+                {loading ? 'Creating Mint...' : 'Create Mint Account'}
+              </button>
+            </form>
+            
+            {createdMintAddress && (
+              <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+                <h4 className="text-sm font-medium text-green-800 mb-2">✅ Mint Account Created Successfully!</h4>
+                <div className="space-y-2">
+                  <p className="text-sm text-green-700">
+                    <span className="font-medium">Mint Address:</span>
+                  </p>
+                  <p className="text-sm font-mono text-green-800 break-all bg-green-100 p-2 rounded">
+                    {createdMintAddress}
+                  </p>
+                  <p className="text-xs text-green-600">
+                    Save this address - you'll need it to mint NFTs or perform other operations.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setCreatedMintAddress(null)
+                      setCreateMintForm({ decimals: 0 })
+                    }}
+                    className="mt-3 text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md transition-colors"
+                  >
+                    Create Another Mint
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )
 
