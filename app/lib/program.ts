@@ -7,6 +7,7 @@ import IDL from '../../target/idl/universal_nft.json';
 import BN_JS from 'bn.js';
 
 export const PROGRAM_ID = new PublicKey('C2jwo1xMeUzb2Pb4xHU72yi4HrSzDdTZKXxtaJH6M5NX');
+export const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 
 // ZetaChain Testnet Chain ID Constants
 export const CHAIN_IDS = {
@@ -70,10 +71,43 @@ export class UniversalNFTClient {
     const provider = new AnchorProvider(
       connection,
       wallet,
-      { commitment: 'confirmed' }
+      { commitment: 'processed', preflightCommitment: 'processed' as any }
     );
     
     this.program = new Program(IDL, provider);
+  }
+
+  private async sha256(data: Uint8Array): Promise<Uint8Array> {
+    // Try Web Crypto first
+    const cryptoImpl: any = (globalThis as any).crypto;
+    if (cryptoImpl && cryptoImpl.subtle && cryptoImpl.subtle.digest) {
+      const hashBuf = await cryptoImpl.subtle.digest('SHA-256', data);
+      return new Uint8Array(hashBuf);
+    }
+    // Node fallback
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const nodeCrypto = require('crypto');
+      const hash = nodeCrypto.createHash('sha256').update(Buffer.from(data)).digest();
+      return new Uint8Array(hash);
+    } catch {
+      throw new Error('No crypto implementation available for SHA-256');
+    }
+  }
+
+  private async computeTokenIdBytes(mint: PublicKey, nextTokenId: BN | number): Promise<Buffer> {
+    const data: number[] = [];
+    // mint (32 bytes)
+    data.push(...Array.from(mint.toBytes()));
+    // nextTokenId u64 LE
+    const nextBuf = Buffer.alloc(8);
+    const nextVal = typeof nextTokenId === 'number' ? BigInt(nextTokenId) : BigInt(nextTokenId.toString());
+    nextBuf.writeBigUInt64LE(nextVal);
+    data.push(...Array.from(nextBuf));
+
+    const digest = await this.sha256(new Uint8Array(data));
+    // take first 8 bytes as LE
+    return Buffer.from(digest.slice(0, 8));
   }
 
   // Get program state PDA
@@ -223,28 +257,45 @@ export class UniversalNFTClient {
       console.log('Token account:', tokenAccount.toString());
       
       const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
-      
-      // Generate a unique NFT origin seed to avoid conflicts
-      const nftOriginSeed = Buffer.concat([
-        Buffer.from('nft_origin'),
-        mint.toBuffer().slice(0, 10) // Take only first 10 bytes to match program
-      ]);
-      
+      // Read program state
+      const programState = await this.getProgramState();
+      if (!programState) throw new Error('Program state not found');
+
+      // Compute token id bytes (first 8 bytes LE of sha256(mint || nextTokenId))
+      const tokenIdBytes = await this.computeTokenIdBytes(mint, programState.nextTokenId);
+      const tokenIdLE = Buffer.from(tokenIdBytes); // 8 bytes
+      const tokenId = Number(tokenIdLE.readBigUInt64LE(0));
+
+      // Derive token-ID–seeded origin PDA
       const [nftOriginPDA] = PublicKey.findProgramAddressSync(
-        [nftOriginSeed],
+        [Buffer.from('nft_origin'), tokenIdLE],
         PROGRAM_ID
       );
-      
-      console.log('Generated unique NFT origin PDA:', nftOriginPDA.toString());
-      console.log('Seed components:', {
-        prefix: 'nft_origin',
-        mint: mint.toString(),
-        seedLength: nftOriginSeed.length,
-        mintBytesUsed: mint.toBuffer().slice(0, 10).toString('hex')
+
+      // Derive Metaplex PDAs
+      const [metadataPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+        METADATA_PROGRAM_ID
+      );
+      const [masterEditionPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer(), Buffer.from('edition')],
+        METADATA_PROGRAM_ID
+      );
+
+      console.log('Derived PDAs:', {
+        nftOriginPDA: nftOriginPDA.toString(),
+        metadataPDA: metadataPDA.toString(),
+        masterEditionPDA: masterEditionPDA.toString(),
+        tokenId,
       });
       
-      const tx = await this.program.methods
-        .mintNft(uri)
+      // Build instruction manually so we can pin the recentBlockhash used (matching the slot above)
+      const expectedNextTokenId = typeof (programState as any).nextTokenId?.toNumber === 'function'
+        ? (programState as any).nextTokenId.toNumber()
+        : Number((programState as any).nextTokenId);
+
+      const signature = await this.program.methods
+        .mintNft(uri, new BN(expectedNextTokenId))
         .accounts({
           programState: programStatePDA,
           nftOrigin: nftOriginPDA,
@@ -254,13 +305,18 @@ export class UniversalNFTClient {
           payer: this.wallet.publicKey,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: web3.SystemProgram.programId,
+          tokenMetadataProgram: METADATA_PROGRAM_ID,
+          metadata: metadataPDA,
+          masterEdition: masterEditionPDA,
         })
         .rpc();
 
-      console.log('NFT minting successful:', tx);
+      
+
+      console.log('NFT minting successful:', signature);
       console.log('=== MINT NFT END ===');
       
-      return tx;
+      return signature as unknown as string;
     } catch (error: any) {
       console.error('=== MINT NFT ERROR ===');
       console.error('Error minting NFT:', error);

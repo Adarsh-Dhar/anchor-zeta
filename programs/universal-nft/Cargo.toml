@@ -20,4 +20,10 @@ init-if-needed = ["anchor-lang/init-if-needed"]
 [dependencies]
 anchor-lang = "0.31.1"
 anchor-spl = { version = "0.31.1", features = ["idl-build"] }
+mpl-token-metadata = "5.1.0"
+
+[patch.crates-io]
+solana-program = "=2.3.0"
+solana-zk-sdk = "=2.3.0"
+solana-zk-token-sdk = "=2.3.0"
 

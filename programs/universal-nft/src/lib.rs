@@ -2,6 +2,15 @@ use anchor_lang::prelude::*;
 use anchor_spl::{
     token::{Mint, Token, TokenAccount, MintTo, Burn},
 };
+use anchor_lang::system_program;
+use anchor_lang::Discriminator;
+use anchor_lang::solana_program::rent::Rent;
+use borsh::BorshSerialize;
+use mpl_token_metadata::instructions::{
+    CreateMetadataAccountV3CpiBuilder,
+    CreateMasterEditionV3CpiBuilder,
+};
+use mpl_token_metadata::types::{DataV2, Creator, Collection, Uses};
 use std::str::FromStr;
 
 declare_id!("C2jwo1xMeUzb2Pb4xHU72yi4HrSzDdTZKXxtaJH6M5NX");
@@ -41,17 +50,15 @@ fn nft_origin_seed(token_id: u64) -> Vec<u8> {
     seed
 }
 
-// Helper function to generate token ID: [mint pubkey + block.number + nextTokenId]
-fn generate_token_id(mint: &Pubkey, block_number: u64, next_token_id: u64) -> u64 {
+// Helper function to generate token ID: [mint pubkey + nextTokenId]
+// Note: Removed dependency on current slot to ensure deterministic PDA derivation client-side
+fn generate_token_id(mint: &Pubkey, next_token_id: u64) -> u64 {
     let mut data = Vec::new();
     data.extend_from_slice(&mint.to_bytes());
-    data.extend_from_slice(&block_number.to_le_bytes());
     data.extend_from_slice(&next_token_id.to_le_bytes());
-    
-    // Create a hash from the combined data
+
     let hash = anchor_lang::solana_program::hash::hash(&data);
-    
-    // Convert first 8 bytes to u64
+
     let mut bytes = [0u8; 8];
     bytes.copy_from_slice(&hash.to_bytes()[..8]);
     u64::from_le_bytes(bytes)
@@ -88,17 +95,23 @@ pub mod universal_nft {
     pub fn mint_nft(
         ctx: Context<MintNFT>,
         uri: String,
+        expected_next_token_id: u64,
     ) -> Result<()> {
         require!(!ctx.accounts.program_state.paused, ErrorCode::ProgramPaused);
         
         let program_state = &mut ctx.accounts.program_state;
         let clock = Clock::get()?;
+
+        // Ensure the client-derived token id uses the same counter
+        require!(
+            program_state.next_token_id == expected_next_token_id,
+            ErrorCode::NextTokenIdMismatch
+        );
         
-        // Generate unique token ID
+        // Generate unique token ID deterministically from mint and next_token_id
         let token_id = generate_token_id(
             &ctx.accounts.mint.key(),
-            clock.slot,
-            program_state.next_token_id
+            expected_next_token_id
         );
         
         // Increment next token ID
@@ -116,16 +129,98 @@ pub mod universal_nft {
         );
         
         anchor_spl::token::mint_to(mint_to_ctx, 1)?;
+
+        // Create metadata and master edition via Metaplex CPIs
+        let data_v2 = DataV2 {
+            name: String::from("Universal NFT"),
+            symbol: String::from("UNFT"),
+            uri: uri.clone(),
+            seller_fee_basis_points: 0,
+            creators: None::<Vec<Creator>>,
+            collection: None::<Collection>,
+            uses: None::<Uses>,
+        };
+
+        // Create Metadata
+        CreateMetadataAccountV3CpiBuilder::new(&ctx.accounts.token_metadata_program)
+            .metadata(&ctx.accounts.metadata)
+            .mint(&ctx.accounts.mint.to_account_info())
+            .mint_authority(&ctx.accounts.mint_authority.to_account_info())
+            .payer(&ctx.accounts.payer.to_account_info())
+            .update_authority(&ctx.accounts.mint_authority.to_account_info(), true)
+            .system_program(&ctx.accounts.system_program.to_account_info())
+            .data(data_v2)
+            .is_mutable(true)
+            .invoke()?;
+
+        // Create Master Edition
+        CreateMasterEditionV3CpiBuilder::new(&ctx.accounts.token_metadata_program)
+            .edition(&ctx.accounts.master_edition)
+            .mint(&ctx.accounts.mint.to_account_info())
+            .update_authority(&ctx.accounts.mint_authority.to_account_info())
+            .mint_authority(&ctx.accounts.mint_authority.to_account_info())
+            .payer(&ctx.accounts.payer.to_account_info())
+            .metadata(&ctx.accounts.metadata)
+            .system_program(&ctx.accounts.system_program.to_account_info())
+            .token_program(&ctx.accounts.token_program.to_account_info())
+            .max_supply(0)
+            .invoke()?;
         
-        // Create NFT origin record
-        let nft_origin = &mut ctx.accounts.nft_origin;
-        nft_origin.token_id = token_id;
-        nft_origin.origin_chain = CHAIN_ID_SOLANA_DEVNET; // Use constant for Solana Devnet
-        nft_origin.origin_token_id = token_id;
-        nft_origin.metadata_uri = uri.clone();
-        nft_origin.mint = ctx.accounts.mint.key();
-        nft_origin.created_at = clock.unix_timestamp;
-        nft_origin.bump = ctx.bumps.nft_origin;
+        // Create NFT origin PDA using token_id seed inside the instruction
+        let token_id_bytes = token_id.to_le_bytes();
+        let (nft_origin_pda, nft_origin_bump) = Pubkey::find_program_address(
+            &[b"nft_origin", &token_id_bytes],
+            ctx.program_id,
+        );
+        require_keys_eq!(ctx.accounts.nft_origin.key(), nft_origin_pda, ErrorCode::NFTOriginNotFound);
+
+        // Calculate exact space for the account based on uri length
+        let uri_len = uri.as_bytes().len();
+        let space: usize = 8  // discriminator
+            + 8  // token_id
+            + 8  // origin_chain
+            + 8  // origin_token_id
+            + 4  // String length prefix
+            + uri_len // String content
+            + 32 // mint pubkey
+            + 8  // created_at
+            + 1; // bump
+
+        // Fund the account for rent exemption
+        let lamports: u64 = Rent::get()?.minimum_balance(space);
+
+        // Create the account owned by this program, signed by PDA
+        let signer_seeds: &[&[&[u8]]] = &[&[b"nft_origin", &token_id_bytes, &[nft_origin_bump]]];
+        let create_cpi_ctx = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            anchor_lang::system_program::CreateAccount {
+                from: ctx.accounts.payer.to_account_info(),
+                to: ctx.accounts.nft_origin.to_account_info(),
+            },
+        );
+        anchor_lang::system_program::create_account(
+            create_cpi_ctx.with_signer(signer_seeds),
+            lamports,
+            space as u64,
+            ctx.program_id,
+        )?;
+
+        // Write discriminator and serialized struct into the new account data
+        let mut data = ctx.accounts.nft_origin.try_borrow_mut_data()?;
+        let disc = NFTOrigin::DISCRIMINATOR;
+        data[..8].copy_from_slice(&disc);
+
+        let mut cursor = &mut data[8..];
+        let origin_record = NFTOrigin {
+            token_id,
+            origin_chain: CHAIN_ID_SOLANA_DEVNET,
+            origin_token_id: token_id,
+            metadata_uri: uri.clone(),
+            mint: ctx.accounts.mint.key(),
+            created_at: clock.unix_timestamp,
+            bump: nft_origin_bump,
+        };
+        origin_record.try_serialize(&mut cursor)?;
         
         emit!(NFTMinted {
             token_id,
@@ -351,14 +446,9 @@ pub struct MintNFT<'info> {
         bump = program_state.bump
     )]
     pub program_state: Account<'info, ProgramState>,
-    #[account(
-        init,
-        payer = payer,
-        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1 + 500,
-        seeds = [b"nft_origin", &mint.key().to_bytes()[..10]],
-        bump
-    )]
-    pub nft_origin: Account<'info, NFTOrigin>,
+    /// CHECK: Created inside instruction with PDA seeds [b"nft_origin", token_id.to_le_bytes()]
+    #[account(mut)]
+    pub nft_origin: AccountInfo<'info>,
     #[account(mut)]
     pub mint: Account<'info, Mint>,
     #[account(mut)]
@@ -368,6 +458,15 @@ pub struct MintNFT<'info> {
     pub payer: Signer<'info>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
+    /// CHECK: Metaplex Token Metadata program
+    #[account(address = mpl_token_metadata::ID)]
+    pub token_metadata_program: AccountInfo<'info>,
+    /// CHECK: Metadata PDA (derived client-side)
+    #[account(mut)]
+    pub metadata: AccountInfo<'info>,
+    /// CHECK: Master Edition PDA (derived client-side)
+    #[account(mut)]
+    pub master_edition: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -561,4 +660,6 @@ pub enum ErrorCode {
     InsufficientTokens,
     #[msg("Token ID overflow")]
     TokenIdOverflow,
+    #[msg("Next token id mismatch between client and program state")]
+    NextTokenIdMismatch,
 }
