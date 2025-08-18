@@ -174,20 +174,23 @@ pub mod universal_nft {
         );
         require_keys_eq!(ctx.accounts.nft_origin.key(), nft_origin_pda, ErrorCode::NFTOriginNotFound);
 
-        // Calculate exact space for the account based on uri length
-        let uri_len = uri.as_bytes().len();
-        let space: usize = 8  // discriminator
-            + 8  // token_id
-            + 8  // origin_chain
-            + 8  // origin_token_id
-            + 4  // String length prefix
-            + uri_len // String content
-            + 32 // mint pubkey
-            + 8  // created_at
-            + 1; // bump
+        // Build the origin record and compute exact serialized length
+        let origin_record = NFTOrigin {
+            token_id,
+            origin_chain: CHAIN_ID_SOLANA_DEVNET,
+            origin_token_id: token_id,
+            metadata_uri: uri.clone(),
+            mint: ctx.accounts.mint.key(),
+            created_at: clock.unix_timestamp,
+            bump: nft_origin_bump,
+        };
+
+        // Serialize to a vec first to determine precise size
+        let serialized = origin_record.try_to_vec()?;
+        let account_size: usize = 8 /* discriminator */ + serialized.len();
 
         // Fund the account for rent exemption
-        let lamports: u64 = Rent::get()?.minimum_balance(space);
+        let lamports: u64 = Rent::get()?.minimum_balance(account_size);
 
         // Create the account owned by this program, signed by PDA
         let signer_seeds: &[&[&[u8]]] = &[&[b"nft_origin", &token_id_bytes, &[nft_origin_bump]]];
@@ -201,7 +204,7 @@ pub mod universal_nft {
         anchor_lang::system_program::create_account(
             create_cpi_ctx.with_signer(signer_seeds),
             lamports,
-            space as u64,
+            account_size as u64,
             ctx.program_id,
         )?;
 
@@ -209,18 +212,7 @@ pub mod universal_nft {
         let mut data = ctx.accounts.nft_origin.try_borrow_mut_data()?;
         let disc = NFTOrigin::DISCRIMINATOR;
         data[..8].copy_from_slice(&disc);
-
-        let mut cursor = &mut data[8..];
-        let origin_record = NFTOrigin {
-            token_id,
-            origin_chain: CHAIN_ID_SOLANA_DEVNET,
-            origin_token_id: token_id,
-            metadata_uri: uri.clone(),
-            mint: ctx.accounts.mint.key(),
-            created_at: clock.unix_timestamp,
-            bump: nft_origin_bump,
-        };
-        origin_record.try_serialize(&mut cursor)?;
+        data[8..8 + serialized.len()].copy_from_slice(&serialized);
         
         emit!(NFTMinted {
             token_id,
