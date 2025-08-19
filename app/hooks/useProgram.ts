@@ -247,14 +247,15 @@ export const useProgram = () => {
       
       // Convert destination owner string to Uint8Array
       console.log('Converting destination owner to bytes...');
-      const destinationOwnerBytes = new TextEncoder().encode(destinationOwner);
-      console.log('Destination owner bytes:', destinationOwnerBytes);
+      const destOwnerBytes20 = evmHexToBytes20(destinationOwner);
+      console.log('Destination owner bytes:', destOwnerBytes20);
+      console.log('Destination Owner (hex):', Buffer.from(destOwnerBytes20).toString('hex')); // sanity log
       
       console.log('Calling client.initiateCrossChainTransferWithLogging...');
       const result = await client.initiateCrossChainTransferWithLogging(
         tokenId,
         destinationChain,
-        destinationOwnerBytes
+        destOwnerBytes20
       );
       
       console.log('Transfer successful! Result:', result);
@@ -422,3 +423,9 @@ export const useProgram = () => {
     wallet: wallet.publicKey?.toString(),
   };
 };
+
+function evmHexToBytes20(addr: string): Uint8Array {
+  const hex = addr.trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(hex)) throw new Error('Invalid EVM address');
+  return Uint8Array.from(Buffer.from(hex.slice(2), 'hex')); // 20 bytes
+}

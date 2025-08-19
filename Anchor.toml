@@ -5,9 +5,8 @@ package_manager = "yarn"
 resolution = true
 skip-lint = false
 
-
 [programs.devnet]
-universal_nft = "C2jwo1xMeUzb2Pb4xHU72yi4HrSzDdTZKXxtaJH6M5NX"
+universal_nft = "5baRbZmwFVrudLM8Mea3X8vavVwWEnHr9Dxfm24KqCNd"
 
 [registry]
 url = "https://api.apr.dev"
@@ -16,9 +15,10 @@ url = "https://api.apr.dev"
 cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
+[scripts]
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
 [test]
 startup_wait = 10000
 shutdown_wait = 0
-
-[scripts]
-test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+upgradeable = false

@@ -1,9 +1,9 @@
 use anchor_lang::prelude::*;
 use anchor_spl::{
     token::{Mint, Token, TokenAccount, MintTo, Burn},
+    associated_token::AssociatedToken,
 };
-use anchor_lang::system_program;
-use anchor_lang::Discriminator;
+ 
 use anchor_lang::solana_program::rent::Rent;
 use borsh::BorshSerialize;
 use mpl_token_metadata::instructions::{
@@ -13,7 +13,53 @@ use mpl_token_metadata::instructions::{
 use mpl_token_metadata::types::{DataV2, Creator, Collection, Uses};
 use std::str::FromStr;
 
-declare_id!("C2jwo1xMeUzb2Pb4xHU72yi4HrSzDdTZKXxtaJH6M5NX");
+declare_id!("5baRbZmwFVrudLM8Mea3X8vavVwWEnHr9Dxfm24KqCNd");
+
+
+pub const ZETA_GATEWAY_PROGRAM_ID: &str = "ZETAjseVjuFsxdRxo6MmTCvqFwb3ZHUx56Co3vCmGis";
+
+// Compute the Anchor instruction discriminator (sighash) for a given method name.
+// Uses SHA-256 over the preimage "global:<name>", then takes the first 8 bytes.
+fn instruction_discriminator(name: &str) -> [u8; 8] {
+    let mut discriminator = [0u8; 8];
+    let preimage = format!("global:{}", name);
+    let hash = anchor_lang::solana_program::hash::hashv(&[preimage.as_bytes()]);
+    discriminator.copy_from_slice(&hash.to_bytes()[..8]);
+    discriminator
+}
+
+
+fn call_gateway<'a>(
+    gateway_program: AccountInfo<'a>,
+    signer: AccountInfo<'a>,
+    receiver: [u8; 20],
+    message: Vec<u8>,
+) -> Result<()> {
+    use anchor_lang::solana_program::instruction::AccountMeta;
+
+    let mut instruction_data = Vec::new();
+    instruction_data.extend_from_slice(&instruction_discriminator("call"));
+    instruction_data.extend_from_slice(&receiver);
+    instruction_data.extend_from_slice(&(message.len() as u32).to_le_bytes());
+    instruction_data.extend_from_slice(&message);
+    instruction_data.push(0u8);
+    
+    let metas = vec![
+        AccountMeta::new(*signer.key, true),
+    ];
+    let infos = vec![signer.clone(), gateway_program.clone()];
+    
+    anchor_lang::solana_program::program::invoke(
+        &anchor_lang::solana_program::instruction::Instruction {
+            program_id: gateway_program.key(),
+            accounts: metas,
+            data: instruction_data,
+        },
+        &infos,
+    )?;
+    
+    Ok(())
+}
 
 // ZetaChain Testnet Chain ID Constants
 pub const CHAIN_ID_SOLANA_DEVNET: u64 = 901;
@@ -24,10 +70,8 @@ pub const CHAIN_ID_POLYGON_AMOY: u64 = 80002;
 pub const CHAIN_ID_ARBITRUM_SEPOLIA: u64 = 421614;
 pub const CHAIN_ID_BITCOIN_TESTNET: u64 = 18332;
 
-// Legacy chain ID for backward compatibility (Solana mainnet)
 pub const CHAIN_ID_SOLANA: u64 = 0;
 
-// Chain name mapping function
 pub fn get_chain_name(chain_id: u64) -> &'static str {
     match chain_id {
         CHAIN_ID_SOLANA_DEVNET => "Solana Devnet",
@@ -42,7 +86,6 @@ pub fn get_chain_name(chain_id: u64) -> &'static str {
     }
 }
 
-// Helper function to generate NFT origin seed
 fn nft_origin_seed(token_id: u64) -> Vec<u8> {
     let mut seed = Vec::new();
     seed.extend_from_slice(b"nft_origin");
@@ -50,8 +93,6 @@ fn nft_origin_seed(token_id: u64) -> Vec<u8> {
     seed
 }
 
-// Helper function to generate token ID: [mint pubkey + nextTokenId]
-// Note: Removed dependency on current slot to ensure deterministic PDA derivation client-side
 fn generate_token_id(mint: &Pubkey, next_token_id: u64) -> u64 {
     let mut data = Vec::new();
     data.extend_from_slice(&mint.to_bytes());
@@ -68,7 +109,6 @@ fn generate_token_id(mint: &Pubkey, next_token_id: u64) -> u64 {
 pub mod universal_nft {
     use super::*;
 
-    /// Initialize the cross-chain NFT program
     pub fn initialize(
         ctx: Context<Initialize>,
         gateway: Pubkey,
@@ -91,7 +131,6 @@ pub mod universal_nft {
         Ok(())
     }
 
-    /// Mint a new NFT on Solana
     pub fn mint_nft(
         ctx: Context<MintNFT>,
         uri: String,
@@ -108,17 +147,14 @@ pub mod universal_nft {
             ErrorCode::NextTokenIdMismatch
         );
         
-        // Generate unique token ID deterministically from mint and next_token_id
         let token_id = generate_token_id(
             &ctx.accounts.mint.key(),
             expected_next_token_id
         );
         
-        // Increment next token ID
         program_state.next_token_id = program_state.next_token_id.checked_add(1)
             .ok_or(ErrorCode::TokenIdOverflow)?;
         
-        // Mint 1 token to the mint authority
         let mint_to_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             MintTo {
@@ -130,7 +166,6 @@ pub mod universal_nft {
         
         anchor_spl::token::mint_to(mint_to_ctx, 1)?;
 
-        // Create metadata and master edition via Metaplex CPIs
         let data_v2 = DataV2 {
             name: String::from("Universal NFT"),
             symbol: String::from("UNFT"),
@@ -141,7 +176,6 @@ pub mod universal_nft {
             uses: None::<Uses>,
         };
 
-        // Create Metadata
         CreateMetadataAccountV3CpiBuilder::new(&ctx.accounts.token_metadata_program)
             .metadata(&ctx.accounts.metadata)
             .mint(&ctx.accounts.mint.to_account_info())
@@ -153,7 +187,6 @@ pub mod universal_nft {
             .is_mutable(true)
             .invoke()?;
 
-        // Create Master Edition
         CreateMasterEditionV3CpiBuilder::new(&ctx.accounts.token_metadata_program)
             .edition(&ctx.accounts.master_edition)
             .mint(&ctx.accounts.mint.to_account_info())
@@ -166,7 +199,6 @@ pub mod universal_nft {
             .max_supply(0)
             .invoke()?;
         
-        // Create NFT origin PDA using token_id seed inside the instruction
         let token_id_bytes = token_id.to_le_bytes();
         let (nft_origin_pda, nft_origin_bump) = Pubkey::find_program_address(
             &[b"nft_origin", &token_id_bytes],
@@ -174,7 +206,6 @@ pub mod universal_nft {
         );
         require_keys_eq!(ctx.accounts.nft_origin.key(), nft_origin_pda, ErrorCode::NFTOriginNotFound);
 
-        // Build the origin record and compute exact serialized length
         let origin_record = NFTOrigin {
             token_id,
             origin_chain: CHAIN_ID_SOLANA_DEVNET,
@@ -185,14 +216,11 @@ pub mod universal_nft {
             bump: nft_origin_bump,
         };
 
-        // Serialize to a vec first to determine precise size
         let serialized = origin_record.try_to_vec()?;
-        let account_size: usize = 8 /* discriminator */ + serialized.len();
+        let account_size: usize = 8  + serialized.len();
 
-        // Fund the account for rent exemption
         let lamports: u64 = Rent::get()?.minimum_balance(account_size);
 
-        // Create the account owned by this program, signed by PDA
         let signer_seeds: &[&[&[u8]]] = &[&[b"nft_origin", &token_id_bytes, &[nft_origin_bump]]];
         let create_cpi_ctx = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
@@ -208,7 +236,6 @@ pub mod universal_nft {
             ctx.program_id,
         )?;
 
-        // Write discriminator and serialized struct into the new account data
         let mut data = ctx.accounts.nft_origin.try_borrow_mut_data()?;
         let disc = NFTOrigin::DISCRIMINATOR;
         data[..8].copy_from_slice(&disc);
@@ -223,17 +250,12 @@ pub mod universal_nft {
         Ok(())
     }
 
-    /// Create a new mint for NFT
     pub fn create_mint(
         ctx: Context<CreateMint>,
         decimals: u8,
     ) -> Result<()> {
         require!(!ctx.accounts.program_state.paused, ErrorCode::ProgramPaused);
         
-        // The mint account is automatically initialized by the account constraint above
-        // No need to manually initialize it here
-        
-        // Increment next token ID
         ctx.accounts.program_state.next_token_id = ctx.accounts.program_state.next_token_id
             .checked_add(1)
             .ok_or(ErrorCode::TokenIdOverflow)?;
@@ -248,7 +270,6 @@ pub mod universal_nft {
         Ok(())
     }
 
-    /// Create a new NFT origin record
     pub fn create_nft_origin(
         ctx: Context<CreateNFTOrigin>,
         _token_id: u64,
@@ -278,7 +299,6 @@ pub mod universal_nft {
         Ok(())
     }
 
-    /// Initiate cross-chain transfer (burn NFT)
     pub fn initiate_cross_chain_transfer(
         ctx: Context<CrossChainTransfer>,
         _token_id: u64,
@@ -289,7 +309,6 @@ pub mod universal_nft {
         
         let nft_origin = &ctx.accounts.nft_origin;
         
-        // Burn the NFT token
         let burn_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             Burn {
@@ -301,8 +320,7 @@ pub mod universal_nft {
         
         anchor_spl::token::burn(burn_ctx, 1)?;
         
-        // Create cross-chain message
-        let _cross_chain_message = CrossChainMessage {
+        let cross_chain_message = CrossChainMessage {
             token_id: nft_origin.token_id,
             origin_chain: nft_origin.origin_chain,
             origin_token_id: nft_origin.origin_token_id,
@@ -310,8 +328,20 @@ pub mod universal_nft {
             recipient: destination_owner,
         };
 
-        // Here you would call the Gateway's deposit_and_call instruction
-        // This is a placeholder for the actual Gateway CPI call
+        let message_data = cross_chain_message.try_to_vec()?;
+        
+        let mut evm_recipient = [0u8; 20];
+        evm_recipient.copy_from_slice(&destination_owner[..20]);
+        
+        let gateway_program_ai = ctx.accounts.gateway_program.to_account_info();
+        let user_ai = ctx.accounts.user.to_account_info();
+        call_gateway(
+            gateway_program_ai,
+            user_ai,   // pass signer
+            evm_recipient,
+            message_data,
+        )?;
+
         emit!(CrossChainTransferInitiated {
             token_id: nft_origin.token_id,
             destination_chain,
@@ -322,7 +352,6 @@ pub mod universal_nft {
         Ok(())
     }
 
-    /// Handle incoming cross-chain message
     pub fn receive_cross_chain_message(
         ctx: Context<ReceiveCrossChainMessage>,
         _token_id: u64,
@@ -330,13 +359,11 @@ pub mod universal_nft {
     ) -> Result<()> {
         require!(!ctx.accounts.program_state.paused, ErrorCode::ProgramPaused);
         
-        // Parse the cross-chain message
         let cross_chain_message: CrossChainMessage = CrossChainMessage::try_from_slice(&message)?;
         
         let _program_state = &mut ctx.accounts.program_state;
         let token_id = cross_chain_message.token_id;
 
-        // Create or update NFT origin record
         let nft_origin = &mut ctx.accounts.nft_origin;
         nft_origin.token_id = token_id;
         nft_origin.origin_chain = cross_chain_message.origin_chain;
@@ -346,8 +373,18 @@ pub mod universal_nft {
         nft_origin.created_at = Clock::get()?.unix_timestamp;
         nft_origin.bump = ctx.bumps.nft_origin;
 
-        // Convert [u8; 32] to Pubkey for the recipient
         let recipient_pubkey = Pubkey::new_from_array(cross_chain_message.recipient);
+
+        let mint_to_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            MintTo {
+                mint: ctx.accounts.mint.to_account_info(),
+                to: ctx.accounts.recipient_token_account.to_account_info(),
+                authority: ctx.accounts.mint_authority.to_account_info(),
+            },
+        );
+        
+        anchor_spl::token::mint_to(mint_to_ctx, 1)?;
 
         emit!(CrossChainMessageReceived {
             token_id,
@@ -359,7 +396,6 @@ pub mod universal_nft {
         Ok(())
     }
 
-    /// Pause the program
     pub fn pause(ctx: Context<AdminAction>) -> Result<()> {
         require!(
             ctx.accounts.admin.key() == ctx.accounts.program_state.owner,
@@ -375,7 +411,7 @@ pub mod universal_nft {
         Ok(())
     }
 
-    /// Unpause the program
+
     pub fn unpause(ctx: Context<AdminAction>) -> Result<()> {
         require!(
             ctx.accounts.admin.key() == ctx.accounts.program_state.owner,
@@ -392,7 +428,6 @@ pub mod universal_nft {
     }
 }
 
-// Account Structures
 #[account]
 pub struct ProgramState {
     pub owner: Pubkey,
@@ -413,7 +448,6 @@ pub struct NFTOrigin {
     pub bump: u8,
 }
 
-// Context Structures
 #[derive(Accounts)]
 pub struct Initialize<'info> {
     #[account(
@@ -438,7 +472,8 @@ pub struct MintNFT<'info> {
         bump = program_state.bump
     )]
     pub program_state: Account<'info, ProgramState>,
-    /// CHECK: Created inside instruction with PDA seeds [b"nft_origin", token_id.to_le_bytes()]
+    /// CHECK: PDA is derived and validated inside the instruction before use; account is created and
+    /// initialized by this instruction and only written by the program
     #[account(mut)]
     pub nft_origin: AccountInfo<'info>,
     #[account(mut)]
@@ -450,13 +485,13 @@ pub struct MintNFT<'info> {
     pub payer: Signer<'info>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
-    /// CHECK: Metaplex Token Metadata program
+    /// CHECK: Verified by address constraint to the Token Metadata program ID
     #[account(address = mpl_token_metadata::ID)]
     pub token_metadata_program: AccountInfo<'info>,
-    /// CHECK: Metadata PDA (derived client-side)
+    /// CHECK: PDA derived off-chain by the client per Metaplex conventions; only used by CPI
     #[account(mut)]
     pub metadata: AccountInfo<'info>,
-    /// CHECK: Master Edition PDA (derived client-side)
+    /// CHECK: PDA derived off-chain by the client per Metaplex conventions; only used by CPI
     #[account(mut)]
     pub master_edition: AccountInfo<'info>,
 }
@@ -473,12 +508,12 @@ pub struct CreateNFTOrigin<'info> {
     #[account(
         init,
         payer = payer,
-        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1 + 500, // 8 (discriminator) + 8 (token_id) + 2 (origin_chain) + 8 (origin_token_id) + 4 (String length) + 500 (String content) + 32 (mint) + 8 (created_at) + 1 (bump)
+        space = 8 + 8 + 2 + 8 + 4 + 32 + 8 + 1 + 500, 
         seeds = [&nft_origin_seed(token_id)],
         bump
     )]
     pub nft_origin: Account<'info, NFTOrigin>,
-    /// CHECK: Mint account (placeholder)
+    /// CHECK: Only the pubkey is read; the mint account is validated via downstream token program CPIs
     pub mint: AccountInfo<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -505,6 +540,8 @@ pub struct CrossChainTransfer<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
     pub token_program: Program<'info, Token>,
+    /// CHECK: External program account; only its pubkey is used to invoke CPI
+    pub gateway_program: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -524,11 +561,20 @@ pub struct ReceiveCrossChainMessage<'info> {
         bump
     )]
     pub nft_origin: Account<'info, NFTOrigin>,
-    /// CHECK: Mint account (placeholder)
+    /// CHECK: Only the pubkey is read; actual token semantics enforced by SPL Token program CPIs
+    #[account(mut)]
     pub mint: AccountInfo<'info>,
+    /// CHECK: Only used as a signer or authority pubkey; validated by the downstream CPI
+    pub mint_authority: AccountInfo<'info>,
+    /// CHECK: Only the pubkey is used; balance and ownership validated by SPL Token program CPIs
+    #[account(mut)]
+    pub recipient_token_account: AccountInfo<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub rent: Sysvar<'info, Rent>,
 }
 
 #[derive(Accounts)]
@@ -637,7 +683,6 @@ pub struct MintCreated {
     pub token_id: u64,
 }
 
-// Error Codes
 #[error_code]
 pub enum ErrorCode {
     #[msg("Program is currently paused")]

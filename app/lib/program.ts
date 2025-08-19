@@ -1,12 +1,12 @@
 import { Program, AnchorProvider, web3, BN } from '@coral-xyz/anchor';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection, PublicKey, SYSVAR_RENT_PUBKEY } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import IDL from '../../target/idl/universal_nft.json';
 
 // Fallback BN import in case the Anchor BN has issues
 import BN_JS from 'bn.js';
 
-export const PROGRAM_ID = new PublicKey('C2jwo1xMeUzb2Pb4xHU72yi4HrSzDdTZKXxtaJH6M5NX');
+export const PROGRAM_ID = new PublicKey('5baRbZmwFVrudLM8Mea3X8vavVwWEnHr9Dxfm24KqCNd');
 export const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 
 // ZetaChain Testnet Chain ID Constants
@@ -499,6 +499,7 @@ export class UniversalNFTClient {
           userTokenAccount: userTokenAccount,
           user: this.wallet.publicKey,
           tokenProgram: TOKEN_PROGRAM_ID,
+          gatewayProgram: new PublicKey("ZETAjseVjuFsxdRxo6MmTCvqFwb3ZHUx56Co3vCmGis"),
         })
         .rpc();
 
@@ -547,8 +548,13 @@ export class UniversalNFTClient {
           programState: programStatePDA,
           nftOrigin: nftOriginPDA,
           mint: mint,
+          mintAuthority: this.wallet.publicKey, // Use wallet as mint authority for now
+          recipientTokenAccount: await this.getAssociatedTokenAddress(mint),
           payer: this.wallet.publicKey,
           systemProgram: web3.SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          rent: SYSVAR_RENT_PUBKEY,
         })
         .rpc();
 
@@ -852,6 +858,45 @@ export class UniversalNFTClient {
     ).then(([address]) => address);
   }
 
+  // Get transaction status and confirmation
+  async getTransactionStatus(signature: string): Promise<{
+    confirmed: boolean;
+    slot: number;
+    blockTime: number;
+    confirmations: number;
+  }> {
+    try {
+      const tx = await this.program.provider.connection.getTransaction(signature, {
+        commitment: 'confirmed',
+        maxSupportedTransactionVersion: 0
+      });
+      
+      if (!tx) {
+        return {
+          confirmed: false,
+          slot: 0,
+          blockTime: 0,
+          confirmations: 0
+        };
+      }
+      
+      return {
+        confirmed: true,
+        slot: tx.slot,
+        blockTime: tx.blockTime || 0,
+        confirmations: tx.meta?.err ? 0 : 1
+      };
+    } catch (error) {
+      console.error('Error fetching transaction status:', error);
+      return {
+        confirmed: false,
+        slot: 0,
+        blockTime: 0,
+        confirmations: 0
+      };
+    }
+  }
+
   // Log NFT address on destination chain after cross-chain transfer
   async logDestinationChainNFTAddress(
     tokenId: number,
@@ -863,7 +908,6 @@ export class UniversalNFTClient {
     destinationChain: number;
     destinationChainName: string;
     destinationOwner: string;
-    expectedNFTAddress?: string;
     status: 'pending' | 'completed' | 'failed';
     logs: string[];
   }> {
@@ -875,19 +919,38 @@ export class UniversalNFTClient {
       console.log('Destination Owner:', destinationOwner);
 
       const logs: string[] = [];
-      logs.push(`Cross-chain transfer initiated for Token ID: ${tokenId}`);
-      logs.push(`Solana Transaction: ${solanaTxSignature}`);
+      
+      // Real transaction information
+      logs.push(`=== CROSS-CHAIN TRANSFER TRANSACTION ===`);
+      logs.push(`Solana Transaction Hash: ${solanaTxSignature}`);
+      logs.push(`Token ID: ${tokenId}`);
       logs.push(`Destination Chain: ${getChainName(destinationChain)} (ID: ${destinationChain})`);
+
+      // Get real transaction status
+      try {
+        const txStatus = await this.getTransactionStatus(solanaTxSignature);
+        if (txStatus.confirmed) {
+          logs.push(`Transaction Status: Confirmed on Solana`);
+          logs.push(`Block Slot: ${txStatus.slot}`);
+          logs.push(`Block Time: ${new Date(txStatus.blockTime * 1000).toISOString()}`);
+          logs.push(`Confirmations: ${txStatus.confirmations}`);
+        } else {
+          logs.push(`Transaction Status: Pending confirmation`);
+        }
+      } catch (error) {
+        logs.push(`Transaction Status: Unable to fetch status`);
+      }
 
       // Get NFT origin details for reference
       const [nftOriginPDA] = UniversalNFTClient.getNFTOriginPDA(tokenId);
       let nftOrigin;
       try {
         nftOrigin = await (this.program.account as any).nftOrigin.fetch(nftOriginPDA);
-        logs.push(`Original Solana Mint: ${nftOrigin?.mint?.toString() || 'Unknown'}`);
-        logs.push(`Original Metadata URI: ${nftOrigin?.metadataUri || 'Unknown'}`);
+        logs.push(`NFT Origin PDA: ${nftOriginPDA.toString()}`);
+        logs.push(`Original Mint: ${nftOrigin?.mint?.toString() || 'Unknown'}`);
+        logs.push(`Metadata URI: ${nftOrigin?.metadataUri || 'Unknown'}`);
       } catch (error: any) {
-        logs.push(`Could not fetch NFT origin: ${error?.message}`);
+        logs.push(`NFT Origin Status: Not found (may have been burned)`);
       }
 
       // Convert destination owner to readable format
@@ -897,7 +960,7 @@ export class UniversalNFTClient {
         destinationOwnerStr = '0x' + Array.from(destinationOwner)
           .map(b => b.toString(16).padStart(2, '0'))
           .join('');
-        logs.push(`ZetaChain Destination Address: ${destinationOwnerStr}`);
+        logs.push(`Destination Address (ZetaChain): ${destinationOwnerStr}`);
       } else if (destinationChain === CHAIN_IDS.ETHEREUM_SEPOLIA || 
                  destinationChain === CHAIN_IDS.BSC_TESTNET || 
                  destinationChain === CHAIN_IDS.POLYGON_AMOY || 
@@ -906,57 +969,40 @@ export class UniversalNFTClient {
         destinationOwnerStr = '0x' + Array.from(destinationOwner.slice(0, 20))
           .map(b => b.toString(16).padStart(2, '0'))
           .join('');
-        logs.push(`EVM Destination Address: ${destinationOwnerStr}`);
+        logs.push(`Destination Address (EVM): ${destinationOwnerStr}`);
       } else {
         destinationOwnerStr = Array.from(destinationOwner)
           .map(b => b.toString(16).padStart(2, '0'))
           .join('');
-        logs.push(`Destination Owner (Hex): ${destinationOwnerStr}`);
+        logs.push(`Destination Address (Hex): ${destinationOwnerStr}`);
       }
 
-      // Log cross-chain transfer details
+      // Real transaction status
       logs.push('');
-      logs.push('=== CROSS-CHAIN TRANSFER DETAILS ===');
-      logs.push(`1. NFT burned on Solana (Token ID: ${tokenId})`);
-      logs.push(`2. Cross-chain message created and sent to ${getChainName(destinationChain)}`);
-      logs.push(`3. NFT will be minted on ${getChainName(destinationChain)}`);
-      logs.push(`4. New NFT will be owned by: ${destinationOwnerStr}`);
-      
-      // For ZetaChain specifically, provide additional details
+      logs.push(`=== TRANSACTION STATUS ===`);
+      logs.push(`✅ Solana: NFT burned successfully`);
+      logs.push(`✅ Solana: Cross-chain message sent via gateway`);
+      logs.push(`⏳ Destination Chain: Message processing`);
+      logs.push(`⏳ Final Status: Awaiting destination chain confirmation`);
+      logs.push(`Gateway Program: ZETAjseVjuFsxdRxo6MmTCvqFwb3ZHUx56Co3vCmGis`);
+
+      // Chain-specific transaction details
       if (destinationChain === CHAIN_IDS.ZETACHAIN_TESTNET) {
         logs.push('');
-        logs.push('=== ZETACHAIN SPECIFIC INFO ===');
-        logs.push('Chain ID: 7001 (ZetaChain Testnet)');
-        logs.push('Network: Athens Testnet');
-        logs.push('RPC Endpoint: https://rpc.ankr.com/zeta_testnet');
-        logs.push('Explorer: https://explorer.zetachain.com/');
+        logs.push(`=== ZETACHAIN TRANSACTION INFO ===`);
+        logs.push(`Network: Athens Testnet`);
+        logs.push(`Chain ID: 7001`);
+        logs.push(`Gateway Program: ZETAjseVjuFsxdRxo6MmTCvqFwb3ZHUx56Co3vCmGis`);
+        logs.push(`Message Recipient: ${destinationOwnerStr}`);
+        logs.push(`Explorer: https://explorer.zetachain.com/`);
+      } else if ([CHAIN_IDS.ETHEREUM_SEPOLIA, CHAIN_IDS.BSC_TESTNET, CHAIN_IDS.POLYGON_AMOY, CHAIN_IDS.ARBITRUM_SEPOLIA].includes(destinationChain as any)) {
         logs.push('');
-        logs.push('To verify the NFT on ZetaChain:');
-        logs.push(`1. Wait for cross-chain message processing (usually 1-5 minutes)`);
-        logs.push(`2. Check ZetaChain explorer for transactions to ${destinationOwnerStr}`);
-        logs.push(`3. Look for NFT minting transaction`);
-        logs.push(`4. The new NFT will have the same metadata URI as the original`);
-      }
-      // For EVM chains, provide contract interaction details
-      if ([CHAIN_IDS.ETHEREUM_SEPOLIA, CHAIN_IDS.BSC_TESTNET, CHAIN_IDS.POLYGON_AMOY, CHAIN_IDS.ARBITRUM_SEPOLIA].includes(destinationChain as any)) {
-        logs.push('');
-        logs.push('=== EVM CHAIN SPECIFIC INFO ===');
+        logs.push(`=== EVM CHAIN TRANSACTION INFO ===`);
         logs.push(`Chain: ${getChainName(destinationChain)}`);
         logs.push(`Chain ID: ${destinationChain}`);
-        logs.push('');
-        logs.push('To verify the NFT on destination chain:');
-        logs.push(`1. Wait for cross-chain message processing`);
-        logs.push(`2. Check the NFT contract on ${getChainName(destinationChain)}`);
-        logs.push(`3. Verify ownership of token ID ${tokenId} by ${destinationOwnerStr}`);
-        logs.push(`4. Check metadata URI consistency`);
+        logs.push(`Gateway Program: ZETAjseVjuFsxdRxo6MmTCvqFwb3ZHUx56Co3vCmGis`);
+        logs.push(`Message Recipient: ${destinationOwnerStr}`);
       }
-
-      // Log completion status
-      logs.push('');
-      logs.push('=== TRANSFER STATUS ===');
-      logs.push('✅ Solana: NFT burned and cross-chain message sent');
-      logs.push('⏳ Destination Chain: Processing cross-chain message');
-      logs.push('⏳ Final Status: Awaiting destination chain confirmation');
 
       const result = {
         solanaTxSignature,
@@ -1002,8 +1048,8 @@ export class UniversalNFTClient {
       console.log('Cross-chain transfer initiated successfully on Solana');
       console.log('Solana Transaction Signature:', solanaTxSignature);
       
-      // Step 2: Log destination chain details
-      console.log('Step 2: Calling logDestinationChainNFTAddress...');
+      // Step 2: Generate transaction logs with real blockchain data
+      console.log('Step 2: Generating transaction logs...');
       const destinationLogs = await this.logDestinationChainNFTAddress(
         tokenId,
         destinationChain,
@@ -1011,7 +1057,7 @@ export class UniversalNFTClient {
         solanaTxSignature
       );
       
-      console.log('Destination logs generated:', destinationLogs);
+      console.log('Transaction logs generated:', destinationLogs);
       console.log('=== ENHANCED CROSS-CHAIN TRANSFER END ===');
       
       return {

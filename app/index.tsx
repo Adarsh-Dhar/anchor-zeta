@@ -730,12 +730,13 @@ const AppContent: React.FC = () => {
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Initiate Cross-Chain Transfer</h3>
             <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ Before initiating a transfer:</h4>
+              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ Cross-Chain Transfer Process:</h4>
               <ul className="text-sm text-blue-700 space-y-1">
-                <li>• Make sure the NFT origin exists</li>
-                <li>• Ensure you own the NFT tokens</li>
-                <li>• The program must not be paused</li>
-                <li>• You need sufficient SOL for transaction fees</li>
+                <li>• NFT will be burned on Solana (permanent)</li>
+                <li>• Cross-chain message sent via ZetaChain gateway</li>
+                <li>• Message contains token ID, metadata, and recipient</li>
+                <li>• Destination chain will mint new NFT to recipient</li>
+                <li>• Requires sufficient SOL for transaction fees</li>
               </ul>
             </div>
             <form onSubmit={handleTransfer} className="space-y-4">
@@ -798,18 +799,49 @@ const AppContent: React.FC = () => {
             </form>
             {crossChainLogs && (
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mt-6">
-                <h4 className="text-lg font-semibold text-gray-900 mb-3">
-                  Cross-Chain Transfer Logs
-                </h4>
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="text-lg font-semibold text-gray-900">
+                    Cross-Chain Transfer Transaction
+                  </h4>
+                  <button
+                    onClick={() => initiateTransferWithLogging(transferForm.tokenId, transferForm.destinationChain, transferForm.destinationOwner)}
+                    className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md transition-colors"
+                  >
+                    Refresh Status
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div className="bg-white p-3 rounded-lg border">
+                    <p className="text-sm font-medium text-gray-700">Status</p>
+                    <p className={`text-lg font-semibold ${
+                      crossChainLogs.status === 'completed' ? 'text-green-600' : 
+                      crossChainLogs.status === 'failed' ? 'text-red-600' : 'text-yellow-600'
+                    }`}>
+                      {crossChainLogs.status === 'completed' ? '✅ Completed' :
+                       crossChainLogs.status === 'failed' ? '❌ Failed' : '⏳ Pending'}
+                    </p>
+                  </div>
+                  <div className="bg-white p-3 rounded-lg border">
+                    <p className="text-sm font-medium text-gray-700">Destination Chain</p>
+                    <p className="text-lg font-semibold text-blue-600">{crossChainLogs.destinationChainName}</p>
+                  </div>
+                  <div className="bg-white p-3 rounded-lg border">
+                    <p className="text-sm font-medium text-gray-700">Recipient</p>
+                    <p className="text-sm font-mono text-gray-900 break-all">{crossChainLogs.destinationOwner}</p>
+                  </div>
+                  <div className="bg-white p-3 rounded-lg border">
+                    <p className="text-sm font-medium text-gray-700">Solana TX Hash</p>
+                    <p className="text-sm font-mono text-gray-900 break-all">{crossChainLogs.solanaTxSignature}</p>
+                  </div>
+                </div>
                 <div className="bg-white border border-gray-200 rounded p-3 max-h-96 overflow-y-auto">
                   <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono">
                     {crossChainLogs.logs.join('\n')}
                   </pre>
                 </div>
-                <div className="mt-3 text-sm text-gray-600">
-                  <p><strong>Status:</strong> {crossChainLogs.status}</p>
-                  <p><strong>Destination Chain:</strong> {crossChainLogs.destinationChainName}</p>
-                  <p><strong>Destination Owner:</strong> {crossChainLogs.destinationOwner}</p>
+                <div className="mt-3 text-xs text-gray-500">
+                  <p>✅ Transaction logs show real blockchain data from the cross-chain transfer</p>
+                  <p>🔍 Use the refresh button to get the latest transaction status</p>
                 </div>
               </div>
             )}
