@@ -30,9 +30,7 @@ const AppContent: React.FC = () => {
     error,
     success,
     initialize,
-    createMint,
-    mintNFT,
-    createNFTOrigin,
+    createMintAndNFT,
     receiveMessage,
     pauseProgram,
     unpauseProgram,
@@ -58,16 +56,11 @@ const AppContent: React.FC = () => {
     decimals: 0
   })
   const [createdMintAddress, setCreatedMintAddress] = useState<string | null>(null)
-  const [createOriginForm, setCreateOriginForm] = useState({
-    tokenId: 1,
-    originChain: 901, // Default to Solana Devnet
-    metadataUri: '',
-    mint: ''
-  })
+  const [createdTokenId, setCreatedTokenId] = useState<number | null>(null)
   const [transferForm, setTransferForm] = useState({
     tokenId: 1,
     destinationChain: 7001, // Default to ZetaChain Testnet
-    destinationOwner: ''
+    destinationOwner: '0xfeC46bFEE779652CA9c2706F5cA12D92c81B4188' // Your deployed ZetaChain contract
   })
   const [receiveForm, setReceiveForm] = useState({
     tokenId: 1,
@@ -179,27 +172,6 @@ const AppContent: React.FC = () => {
     }
   }
 
-  const handleMintNFT = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    // Validate inputs
-    if (!mintForm.uri.trim()) {
-      alert('Please enter a metadata URI');
-      return;
-    }
-    
-    if (!mintForm.mint.trim()) {
-      alert('Please enter a mint address');
-      return;
-    }
-    
-    try {
-      await mintNFT(mintForm.uri, mintForm.mint)
-    } catch (err) {
-      // Error is already handled by the hook
-    }
-  }
-
   const handleCreateMint = async (e: React.FormEvent) => {
     e.preventDefault()
     
@@ -214,55 +186,22 @@ const AppContent: React.FC = () => {
       return;
     }
     
-    try {
-      const result = await createMint(createMintForm.decimals)
-      if (result?.mintAddress) {
-        setCreatedMintAddress(result.mintAddress)
-        // Automatically populate the mint form
-        setMintForm(prev => ({ ...prev, mint: result.mintAddress }))
-      }
-    } catch (err) {
-      // Error is already handled by the hook
-    }
-  }
-
-  const handleCreateOrigin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    // Validate inputs
-    if (!createOriginForm.tokenId || isNaN(createOriginForm.tokenId)) {
-      alert('Please enter a valid token ID');
-      return;
-    }
-    
-    if (!createOriginForm.originChain || isNaN(createOriginForm.originChain)) {
-      alert('Please enter a valid origin chain');
-      return;
-    }
-    
-    if (!createOriginForm.metadataUri.trim()) {
+    if (!mintForm.uri.trim()) {
       alert('Please enter a metadata URI');
       return;
     }
     
-    if (!createOriginForm.mint.trim()) {
-      alert('Please enter a valid mint address');
-      return;
-    }
-    
-    console.log('Creating NFT origin with form data:', createOriginForm);
-    
     try {
-      const result = await createNFTOrigin(
-        createOriginForm.tokenId,
-        createOriginForm.originChain,
-        createOriginForm.tokenId,
-        createOriginForm.metadataUri,
-        createOriginForm.mint
-      )
-      console.log('NFT origin created successfully:', result);
+      // For the combined function, we need both URI and decimals
+      const result = await createMintAndNFT(mintForm.uri, createMintForm.decimals)
+      if (result?.mintAddress) {
+        setCreatedMintAddress(result.mintAddress)
+        setCreatedTokenId(result.tokenId)
+        // Automatically populate the mint form and transfer form
+        setMintForm(prev => ({ ...prev, mint: result.mintAddress }))
+        setTransferForm(prev => ({ ...prev, tokenId: result.tokenId }))
+      }
     } catch (err) {
-      console.error('Error in handleCreateOrigin:', err);
       // Error is already handled by the hook
     }
   }
@@ -289,11 +228,11 @@ const AppContent: React.FC = () => {
     try {
       await initiateTransferWithLogging(transferForm.tokenId, transferForm.destinationChain, transferForm.destinationOwner)
       
-      // Clear form after successful transfer
+      // Clear form after successful transfer (but keep the contract address)
       setTransferForm({
         tokenId: 1,
         destinationChain: 7001, // Default to ZetaChain Testnet
-        destinationOwner: ''
+        destinationOwner: '0xfeC46bFEE779652CA9c2706F5cA12D92c81B4188' // Keep the contract address
       });
     } catch (err) {
       // Error is already handled by the hook
@@ -349,10 +288,8 @@ const AppContent: React.FC = () => {
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'initialize', label: 'Initialize' },
-    { id: 'create-mint', label: 'Create Mint' },
-    { id: 'mint', label: 'Mint NFT' },
-    { id: 'create-origin', label: 'Create Origin' },
-    { id: 'transfer', label: 'Cross-Chain Transfer' },
+    { id: 'create-mint-and-nft', label: 'Create Mint & NFT' },
+    { id: 'transfer', label: 'Cross-Chain Transfer ✅' },
     { id: 'receive', label: 'Receive Message' },
     { id: 'admin', label: 'Admin' }
   ]
@@ -398,7 +335,7 @@ const AppContent: React.FC = () => {
               </div>
             )}
             
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <div className="bg-white rounded-xl shadow-lg p-6">
                 <h3 className="text-lg font-semibold text-gray-900">Total NFTs</h3>
                 <p className="text-3xl font-bold text-blue-600">{frontendNFTOrigins.length}</p>
@@ -412,6 +349,11 @@ const AppContent: React.FC = () => {
               <div className="bg-white rounded-xl shadow-lg p-6">
                 <h3 className="text-lg font-semibold text-gray-900">Next Token ID</h3>
                 <p className="text-3xl font-bold text-purple-600">{frontendProgramState?.nextTokenId || 0}</p>
+              </div>
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <h3 className="text-lg font-semibold text-gray-900">ZetaChain Integration</h3>
+                <p className="text-3xl font-bold text-green-600">✅ Ready</p>
+                <p className="text-xs text-gray-500 mt-1">Contract: 0xfeC46b...4188</p>
               </div>
             </div>
             
@@ -433,11 +375,19 @@ const AppContent: React.FC = () => {
             
             <div className="bg-white rounded-xl shadow-lg p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Supported Chain IDs</h3>
+              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-sm text-green-700">
+                  <strong>🎯 Primary Integration:</strong> ZetaChain Testnet (7001) - Your contract is deployed and ready!
+                </p>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {getChainOptions().map(option => (
-                  <div key={option.value} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div key={option.value} className={`flex items-center justify-between p-3 rounded-lg ${
+                    option.value === 7001 ? 'bg-green-100 border border-green-300' : 'bg-gray-50'
+                  }`}>
                     <span className="text-sm font-medium text-gray-700">{option.label}</span>
                     <span className="text-xs text-gray-500 font-mono">{option.value}</span>
+                    {option.value === 7001 && <span className="text-xs text-green-600 font-medium">✅ Ready</span>}
                   </div>
                 ))}
               </div>
@@ -511,29 +461,34 @@ const AppContent: React.FC = () => {
           </div>
         )
 
-      case 'create-mint':
+      case 'create-mint-and-nft':
         return (
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Create Mint Account</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Create Mint & Mint NFT</h3>
             <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ Before creating a mint:</h4>
+              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ What this does:</h4>
               <ul className="text-sm text-blue-700 space-y-1">
-                <li>• Make sure the program is initialized</li>
-                <li>• The program must not be paused</li>
-                <li>• You need sufficient SOL for transaction fees</li>
-                <li>• For NFTs, typically use 0 decimals</li>
-              </ul>
-            </div>
-            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-              <h4 className="text-sm font-medium text-green-800 mb-2">What happens when you create a mint?</h4>
-              <ul className="text-sm text-green-700 space-y-1">
-                <li>• A new SPL Token mint account is created with the specified decimals</li>
-                <li>• You become the mint authority and freeze authority</li>
-                <li>• An NFT origin record is automatically created</li>
-                <li>• The mint address will be displayed after successful creation</li>
+                <li>• Creates a new SPL Token mint account with the specified decimals</li>
+                <li>• Mints 1 NFT token to your wallet</li>
+                <li>• Creates metadata for the NFT (name, symbol, URI)</li>
+                <li>• Creates a master edition for the NFT</li>
+                <li>• Creates an NFT origin record</li>
+                <li>• All in one transaction!</li>
               </ul>
             </div>
             <form onSubmit={handleCreateMint} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Metadata URI</label>
+                <p className="text-sm text-gray-500 mb-2">URI pointing to the NFT metadata (JSON format)</p>
+                <input
+                  type="url"
+                  value={mintForm.uri}
+                  onChange={(e) => setMintForm({...mintForm, uri: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="https://arweave.net/your-metadata or ipfs://your-hash"
+                  required
+                />
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Decimals</label>
                 <input
@@ -557,14 +512,17 @@ const AppContent: React.FC = () => {
                 disabled={loading || !isConnected}
                 className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed"
               >
-                {loading ? 'Creating Mint...' : 'Create Mint Account'}
+                {loading ? 'Creating Mint & NFT...' : 'Create Mint & Mint NFT'}
               </button>
             </form>
             
             {createdMintAddress && (
               <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-                <h4 className="text-sm font-medium text-green-800 mb-2">✅ Mint Account Created Successfully!</h4>
+                <h4 className="text-sm font-medium text-green-800 mb-2">✅ Mint & NFT Created Successfully!</h4>
                 <div className="space-y-2">
+                  <p className="text-sm text-green-700">
+                    <span className="font-medium">Token ID:</span> {createdTokenId}
+                  </p>
                   <p className="text-sm text-green-700">
                     <span className="font-medium">Mint Address:</span>
                   </p>
@@ -572,156 +530,35 @@ const AppContent: React.FC = () => {
                     {createdMintAddress}
                   </p>
                   <p className="text-xs text-green-600">
-                    Save this address - you'll need it to mint NFTs or perform other operations.
+                    Your NFT has been minted and is now in your wallet! The mint account, token account, metadata, and origin record were all created in one transaction.
+                    <br /><br />
+                    <strong>💡 Tip:</strong> You can now use Token ID {createdTokenId} for cross-chain transfers.
                   </p>
-                  <button
-                    onClick={() => {
-                      setCreatedMintAddress(null)
-                      setCreateMintForm({ decimals: 0 })
-                    }}
-                    className="mt-3 text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md transition-colors"
-                  >
-                    Create Another Mint
-                  </button>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => {
+                        setCreatedMintAddress(null)
+                        setCreatedTokenId(null)
+                        setCreateMintForm({ decimals: 0 })
+                        setMintForm({ uri: '', mint: '' })
+                      }}
+                      className="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md transition-colors"
+                    >
+                      Create Another NFT
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCreatedMintAddress(null)
+                        setCreatedTokenId(null)
+                      }}
+                      className="text-sm bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded-md transition-colors"
+                    >
+                      Clear NFT Data
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
-          </div>
-        )
-
-      case 'mint':
-        return (
-          <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Mint New NFT</h3>
-            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ Before minting an NFT:</h4>
-              <ul className="text-sm text-blue-700 space-y-1">
-                <li>• Make sure the program is initialized</li>
-                <li>• Ensure you have a valid mint address</li>
-                <li>• The program must not be paused</li>
-                <li>• You need sufficient SOL for transaction fees</li>
-              </ul>
-            </div>
-            <form onSubmit={handleMintNFT} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Metadata URI</label>
-                <p className="text-sm text-gray-500 mb-2">URI pointing to the NFT metadata (JSON format)</p>
-                <input
-                  type="url"
-                  value={mintForm.uri}
-                  onChange={(e) => setMintForm({...mintForm, uri: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="https://arweave.net/your-metadata or ipfs://your-hash"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-gray-700 mb-2">Mint Address</label>
-                <p className="text-sm text-gray-500 mb-2">Public key of the SPL Token mint account to mint the NFT to</p>
-                <input
-                  type="text"
-                  value={mintForm.mint}
-                  onChange={(e) => setMintForm({...mintForm, mint: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., 11111111111111111111111111111111"
-                  required
-                />
-              </div>
-              <button 
-                type="submit" 
-                disabled={loading || !isConnected}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed"
-              >
-                {loading ? 'Minting...' : 'Mint NFT'}
-              </button>
-            </form>
-          </div>
-        )
-
-      case 'create-origin':
-        return (
-          <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Create NFT Origin Record</h3>
-            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ Before creating an NFT origin:</h4>
-              <ul className="text-sm text-blue-700 space-y-1">
-                <li>• Make sure the program is initialized</li>
-                <li>• Ensure you have a valid mint address</li>
-                <li>• The program must not be paused</li>
-                <li>• You need sufficient SOL for transaction fees</li>
-              </ul>
-            </div>
-            <form onSubmit={handleCreateOrigin} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Token ID</label>
-                <p className="text-sm text-gray-500 mb-2">Unique identifier for the NFT (must be greater than 0)</p>
-                <input
-                  type="number"
-                  value={createOriginForm.tokenId}
-                  onChange={(e) => {
-                    const value = parseInt(e.target.value);
-                    if (!isNaN(value)) {
-                      setCreateOriginForm({...createOriginForm, tokenId: value});
-                    }
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  min="1"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Origin Chain</label>
-                <p className="text-sm text-gray-500 mb-2">Select the blockchain where the NFT originated</p>
-                <select
-                  value={createOriginForm.originChain}
-                  onChange={(e) => {
-                    const value = parseInt(e.target.value);
-                    if (!isNaN(value)) {
-                      setCreateOriginForm({...createOriginForm, originChain: value});
-                    }
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  {getChainOptions().map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Metadata URI</label>
-                <p className="text-sm text-gray-500 mb-2">URI pointing to the NFT metadata (JSON format)</p>
-                <input
-                  type="url"
-                  value={createOriginForm.metadataUri}
-                  onChange={(e) => setCreateOriginForm({...createOriginForm, metadataUri: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="https://arweave.net/your-metadata or ipfs://your-hash"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Mint Address</label>
-                <p className="text-sm text-gray-500 mb-2">Public key of the SPL Token mint account</p>
-                <input
-                  type="text"
-                  value={createOriginForm.mint}
-                  onChange={(e) => setCreateOriginForm({...createOriginForm, mint: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., 11111111111111111111111111111111"
-                  required
-                />
-              </div>
-              <button 
-                type="submit" 
-                disabled={loading || !isConnected}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed"
-              >
-                {loading ? 'Creating...' : 'Create NFT Origin'}
-              </button>
-            </form>
           </div>
         )
 
@@ -729,19 +566,26 @@ const AppContent: React.FC = () => {
         return (
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Initiate Cross-Chain Transfer</h3>
-            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ Cross-Chain Transfer Process:</h4>
-              <ul className="text-sm text-blue-700 space-y-1">
-                <li>• NFT will be burned on Solana (permanent)</li>
+            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+              <h4 className="text-sm font-medium text-green-800 mb-2">✅ ZetaChain Contract Integration Ready:</h4>
+              <ul className="text-sm text-green-700 space-y-1">
+                <li>• Your ZetaChain contract is deployed at: <code className="bg-green-100 px-1 rounded">0xfeC46bFEE779652CA9c2706F5cA12D92c81B4188</code></li>
+                <li>• NFT will be burned on Solana and minted on ZetaChain</li>
                 <li>• Cross-chain message sent via ZetaChain gateway</li>
-                <li>• Message contains token ID, metadata, and recipient</li>
-                <li>• Destination chain will mint new NFT to recipient</li>
-                <li>• Requires sufficient SOL for transaction fees</li>
+                <li>• Your contract's onCall function will handle the NFT minting</li>
+                <li>• You'll get real ZetaChain transaction hashes!</li>
               </ul>
             </div>
             <form onSubmit={handleTransfer} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Token ID</label>
+                {createdTokenId && (
+                  <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-sm text-blue-700">
+                      <strong>Available NFT:</strong> Token ID {createdTokenId} (Mint: {createdMintAddress?.slice(0, 8)}...{createdMintAddress?.slice(-8)})
+                    </p>
+                  </div>
+                )}
                 <input
                   type="number"
                   value={transferForm.tokenId}
@@ -755,6 +599,11 @@ const AppContent: React.FC = () => {
                   min="1"
                   required
                 />
+                {!createdTokenId && (
+                  <p className="mt-1 text-sm text-gray-500">
+                    You need to create an NFT first before you can transfer it.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Destination Chain</label>
@@ -778,14 +627,20 @@ const AppContent: React.FC = () => {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Destination Owner</label>
-                <p className="text-sm text-gray-500 mb-2">Address of the recipient on the destination chain</p>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Destination Owner (ZetaChain Contract)</label>
+                <p className="text-sm text-blue-600 mb-2">⚠️ This should be your deployed ZetaChain contract address (0xfeC46bFEE779652CA9c2706F5cA12D92c81B4188)</p>
+                <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-sm text-blue-700">
+                    <strong>What happens:</strong> When you transfer an NFT, it will be burned on Solana and minted on ZetaChain at this contract address. 
+                    The contract's <code className="bg-blue-100 px-1 rounded">onCall</code> function will automatically handle the NFT creation.
+                  </p>
+                </div>
                 <input
                   type="text"
                   value={transferForm.destinationOwner}
                   onChange={(e) => setTransferForm({...transferForm, destinationOwner: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., destination_wallet_address"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-500"
+                  placeholder="0xfeC46bFEE779652CA9c2706F5cA12D92c81B4188"
                   required
                 />
               </div>
@@ -842,6 +697,7 @@ const AppContent: React.FC = () => {
                 <div className="mt-3 text-xs text-gray-500">
                   <p>✅ Transaction logs show real blockchain data from the cross-chain transfer</p>
                   <p>🔍 Use the refresh button to get the latest transaction status</p>
+                  <p>📋 ZetaChain Contract: <code className="bg-gray-100 px-1 rounded">0xfeC46bFEE779652CA9c2706F5cA12D92c81B4188</code></p>
                 </div>
               </div>
             )}
@@ -951,7 +807,10 @@ const AppContent: React.FC = () => {
               <div className="p-2 bg-blue-100 rounded-lg">
                 <div className="w-6 h-6 bg-blue-600 rounded"></div>
               </div>
-              <h1 className="text-xl font-bold text-blue-600">Universal NFT</h1>
+              <div>
+                <h1 className="text-xl font-bold text-blue-600">Universal NFT</h1>
+                <p className="text-xs text-green-600 font-medium">✅ ZetaChain Integration Ready</p>
+              </div>
             </div>
             
             <WalletConnect />
@@ -987,7 +846,8 @@ const AppContent: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="text-center text-gray-600">
             <p>Universal NFT - Cross-Chain NFT Platform</p>
-            <p className="text-sm mt-2">Built with Solana and Anchor Framework</p>
+            <p className="text-sm mt-2">Built with Solana, Anchor Framework & ZetaChain</p>
+            <p className="text-xs mt-1 text-green-600">Contract: 0xfeC46bFEE779652CA9c2706F5cA12D92c81B4188</p>
           </div>
         </div>
       </footer>

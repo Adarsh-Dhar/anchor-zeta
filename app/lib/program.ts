@@ -4,7 +4,7 @@ import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token
 import IDL from '../../target/idl/universal_nft.json';
 
 // Fallback BN import in case the Anchor BN has issues
-import BN_JS from 'bn.js';
+
 
 export const PROGRAM_ID = new PublicKey('5baRbZmwFVrudLM8Mea3X8vavVwWEnHr9Dxfm24KqCNd');
 export const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
@@ -77,37 +77,29 @@ export class UniversalNFTClient {
     this.program = new Program(IDL, provider);
   }
 
-  private async sha256(data: Uint8Array): Promise<Uint8Array> {
-    // Try Web Crypto first
-    const cryptoImpl: any = (globalThis as any).crypto;
-    if (cryptoImpl && cryptoImpl.subtle && cryptoImpl.subtle.digest) {
-      const hashBuf = await cryptoImpl.subtle.digest('SHA-256', data);
-      return new Uint8Array(hashBuf);
-    }
-    // Node fallback
+
+
+
+
+  // Initialize the program
+  async initialize(gateway: PublicKey, nextTokenId: number): Promise<string> {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const nodeCrypto = require('crypto');
-      const hash = nodeCrypto.createHash('sha256').update(Buffer.from(data)).digest();
-      return new Uint8Array(hash);
-    } catch {
-      throw new Error('No crypto implementation available for SHA-256');
+      const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
+      
+      const tx = await this.program.methods
+        .initialize(gateway, new BN(nextTokenId))
+        .accounts({
+          programState: programStatePDA,
+          payer: this.wallet.publicKey,
+          systemProgram: web3.SystemProgram.programId,
+        })
+        .rpc();
+
+      return tx;
+    } catch (error) {
+      console.error('Error initializing program:', error);
+      throw error;
     }
-  }
-
-  private async computeTokenIdBytes(mint: PublicKey, nextTokenId: BN | number): Promise<Buffer> {
-    const data: number[] = [];
-    // mint (32 bytes)
-    data.push(...Array.from(mint.toBytes()));
-    // nextTokenId u64 LE
-    const nextBuf = Buffer.alloc(8);
-    const nextVal = typeof nextTokenId === 'number' ? BigInt(nextTokenId) : BigInt(nextTokenId.toString());
-    nextBuf.writeBigUInt64LE(nextVal);
-    data.push(...Array.from(nextBuf));
-
-    const digest = await this.sha256(new Uint8Array(data));
-    // take first 8 bytes as LE
-    return Buffer.from(digest.slice(0, 8));
   }
 
   // Get program state PDA
@@ -145,302 +137,122 @@ export class UniversalNFTClient {
     );
   }
 
-  // Initialize the program
-  async initialize(gateway: PublicKey, nextTokenId: number): Promise<string> {
+  // Create mint account and mint NFT in one transaction
+  async createMintAndNFT(uri: string, decimals: number): Promise<{ signature: string; mintAddress: string; tokenId: number }> {
     try {
-      const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
-      
-      const tx = await this.program.methods
-        .initialize(gateway, new BN(nextTokenId))
-        .accounts({
-          programState: programStatePDA,
-          payer: this.wallet.publicKey,
-          systemProgram: web3.SystemProgram.programId,
-        })
-        .rpc();
-
-      return tx;
-    } catch (error) {
-      console.error('Error initializing program:', error);
-      throw error;
-    }
-  }
-
-  // Create mint account
-  async createMint(decimals: number): Promise<{ signature: string; mintAddress: string }> {
-    try {
-      console.log('=== CREATE MINT START ===');
-      console.log('Creating mint with decimals:', decimals);
+      console.log('=== CREATE MINT AND NFT START ===');
+      console.log('Creating mint and NFT with URI:', uri);
+      console.log('Decimals:', decimals);
       console.log('Timestamp:', new Date().toISOString());
       console.log('Wallet address:', this.wallet.publicKey.toString());
       
       const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
       console.log('Program state PDA:', programStatePDA.toString());
       
-      // Get current program state to know the next token ID
-      const programState = await this.getProgramState();
-      if (!programState) {
-        throw new Error('Failed to get program state');
-      }
-      
-      // Safe conversion function for BN to number
-      const safeBNToNumber = (bn: any): number => {
-        try {
-          return bn.toNumber();
-        } catch (error) {
-          const stringValue = bn.toString();
-          const numValue = Number(stringValue);
-          if (isNaN(numValue)) {
-            console.warn('Failed to convert BN to number, using 0 as fallback:', stringValue);
-            return 0;
-          }
-          return numValue;
-        }
-      };
-      
-      const nextTokenId = safeBNToNumber(programState.nextTokenId);
-      console.log('Current program state - next token ID:', nextTokenId);
+      // Get the current next_token_id from the program state
+      const programState = await (this.program.account as any).programState.fetch(programStatePDA);
+      const currentNextTokenId = programState.nextTokenId;
+      console.log('Current next_token_id:', currentNextTokenId.toString());
       
       // Generate a new mint keypair for each mint creation
       const mintKeypair = web3.Keypair.generate();
       console.log('Generated mint keypair:', mintKeypair.publicKey.toString());
       
-      console.log('Calling program.createMint with accounts:', {
+      // Get the Associated Token Account address for the mint
+      const tokenAccount = await this.getAssociatedTokenAddress(mintKeypair.publicKey);
+      console.log('Token account address:', tokenAccount.toString());
+      
+      // Derive Metaplex PDAs
+      const [metadataPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mintKeypair.publicKey.toBuffer()],
+        METADATA_PROGRAM_ID
+      );
+      const [masterEditionPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mintKeypair.publicKey.toBuffer(), Buffer.from('edition')],
+        METADATA_PROGRAM_ID
+      );
+      
+      // Generate the token_id that will be used (same logic as in the program)
+      const tokenIdData = Buffer.concat([
+        mintKeypair.publicKey.toBuffer(),
+        Buffer.from(currentNextTokenId.toArray('le', 8))
+      ]);
+      
+      // Use Web Crypto API for SHA256 hash (browser compatible)
+      const tokenIdHash = await crypto.subtle.digest('SHA-256', tokenIdData);
+      const tokenIdHashArray = new Uint8Array(tokenIdHash);
+      const predictedTokenId = new DataView(tokenIdHashArray.buffer).getBigUint64(0, true); // true for little-endian
+      console.log('Predicted token_id:', predictedTokenId.toString());
+      
+      // Derive the correct nft_origin PDA using the predicted token_id
+      const tokenIdBuffer = Buffer.alloc(8);
+      tokenIdBuffer.writeBigUInt64LE(predictedTokenId);
+      const [nftOriginPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('nft_origin'), tokenIdBuffer],
+        PROGRAM_ID
+      );
+      
+      console.log('Derived PDAs:', {
+        metadataPDA: metadataPDA.toString(),
+        masterEditionPDA: masterEditionPDA.toString(),
+        nftOriginPDA: nftOriginPDA.toString(),
+      });
+      
+      console.log('Calling program.createMintAndNft with accounts:', {
         programState: programStatePDA.toString(),
+        nftOrigin: nftOriginPDA.toString(),
         mint: mintKeypair.publicKey.toString(),
+        tokenAccount: tokenAccount.toString(),
         mintAuthority: this.wallet.publicKey.toString(),
+        payer: this.wallet.publicKey.toString(),
         tokenProgram: TOKEN_PROGRAM_ID.toString(),
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID.toString(),
         systemProgram: web3.SystemProgram.programId.toString(),
         rent: web3.SYSVAR_RENT_PUBKEY.toString(),
+        tokenMetadataProgram: METADATA_PROGRAM_ID.toString(),
+        metadata: metadataPDA.toString(),
+        masterEdition: masterEditionPDA.toString(),
       });
       
       const tx = await this.program.methods
-        .createMint(decimals)
+        .createMintAndNft(uri, decimals)
         .accounts({
           programState: programStatePDA,
+          nftOrigin: nftOriginPDA,
           mint: mintKeypair.publicKey,
+          tokenAccount: tokenAccount,
           mintAuthority: this.wallet.publicKey,
+          payer: this.wallet.publicKey,
           tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           systemProgram: web3.SystemProgram.programId,
           rent: web3.SYSVAR_RENT_PUBKEY,
+          tokenMetadataProgram: METADATA_PROGRAM_ID,
+          metadata: metadataPDA,
+          masterEdition: masterEditionPDA,
         })
         .signers([mintKeypair]) // Include the keypair as a signer
         .rpc();
 
       console.log('Transaction successful:', tx);
-      console.log('=== CREATE MINT END ===');
+      console.log('=== CREATE MINT AND NFT END ===');
       
+      // Use the predicted token ID
       return {
         signature: tx,
-        mintAddress: mintKeypair.publicKey.toString()
+        mintAddress: mintKeypair.publicKey.toString(),
+        tokenId: Number(predictedTokenId)
       };
     } catch (error: any) {
-      console.error('=== CREATE MINT ERROR ===');
-      console.error('Error creating mint:', error);
+      console.error('=== CREATE MINT AND NFT ERROR ===');
+      console.error('Error creating mint and NFT:', error);
       console.error('Error details:', {
         message: error.message,
         stack: error.stack,
         code: error.code,
         logs: error.logs
       });
-      console.error('=== CREATE MINT ERROR END ===');
-      throw error;
-    }
-  }
-
-  // Mint NFT
-  async mintNFT(uri: string, mint: PublicKey, tokenAccount: PublicKey): Promise<string> {
-    try {
-      console.log('=== MINT NFT START ===');
-      console.log('Minting NFT with URI:', uri);
-      console.log('Mint address:', mint.toString());
-      console.log('Token account:', tokenAccount.toString());
-      
-      const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
-      // Read program state
-      const programState = await this.getProgramState();
-      if (!programState) throw new Error('Program state not found');
-
-      // Compute token id bytes (first 8 bytes LE of sha256(mint || nextTokenId))
-      const tokenIdBytes = await this.computeTokenIdBytes(mint, programState.nextTokenId);
-      const tokenIdLE = Buffer.from(tokenIdBytes); // 8 bytes
-      const tokenId = Number(tokenIdLE.readBigUInt64LE(0));
-
-      // Derive token-ID–seeded origin PDA
-      const [nftOriginPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('nft_origin'), tokenIdLE],
-        PROGRAM_ID
-      );
-
-      // Derive Metaplex PDAs
-      const [metadataPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
-        METADATA_PROGRAM_ID
-      );
-      const [masterEditionPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer(), Buffer.from('edition')],
-        METADATA_PROGRAM_ID
-      );
-
-      console.log('Derived PDAs:', {
-        nftOriginPDA: nftOriginPDA.toString(),
-        metadataPDA: metadataPDA.toString(),
-        masterEditionPDA: masterEditionPDA.toString(),
-        tokenId,
-      });
-      
-      // Build instruction manually so we can pin the recentBlockhash used (matching the slot above)
-      const expectedNextTokenId = typeof (programState as any).nextTokenId?.toNumber === 'function'
-        ? (programState as any).nextTokenId.toNumber()
-        : Number((programState as any).nextTokenId);
-
-      const signature = await this.program.methods
-        .mintNft(uri, new BN(expectedNextTokenId))
-        .accounts({
-          programState: programStatePDA,
-          nftOrigin: nftOriginPDA,
-          mint: mint,
-          tokenAccount: tokenAccount,
-          mintAuthority: this.wallet.publicKey,
-          payer: this.wallet.publicKey,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          systemProgram: web3.SystemProgram.programId,
-          tokenMetadataProgram: METADATA_PROGRAM_ID,
-          metadata: metadataPDA,
-          masterEdition: masterEditionPDA,
-        })
-        .rpc();
-
-      
-
-      console.log('NFT minting successful:', signature);
-      console.log('=== MINT NFT END ===');
-      
-      return signature as unknown as string;
-    } catch (error: any) {
-      console.error('=== MINT NFT ERROR ===');
-      console.error('Error minting NFT:', error);
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack,
-        code: error.code,
-        logs: error.logs
-      });
-      console.error('=== MINT NFT ERROR END ===');
-      throw error;
-    }
-  }
-
-  // Create NFT origin
-  async createNFTOrigin(
-    tokenId: number,
-    originChain: number,
-    originTokenId: number,
-    metadataUri: string,
-    mint: PublicKey
-  ): Promise<string> {
-    try {
-      const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
-      const [nftOriginPDA] = UniversalNFTClient.getNFTOriginPDA(tokenId);
-      
-      console.log('Creating NFT origin with params:', {
-        tokenId,
-        originChain,
-        originTokenId,
-        metadataUri,
-        mint: mint.toString()
-      });
-      
-      console.log('Using PDAs:', {
-        programState: programStatePDA.toString(),
-        nftOrigin: nftOriginPDA.toString()
-      });
-      
-      // Check if program state exists
-      try {
-        const programState = await (this.program.account as any).programState.fetch(programStatePDA);
-        console.log('Program state found:', programState);
-        
-        // Check if program is paused
-        if (programState.paused) {
-          throw new Error('Program is currently paused. Please contact the administrator.');
-        }
-      } catch (error) {
-        console.error('Program state not found:', error);
-        throw new Error('Program not initialized. Please initialize the program first.');
-      }
-      
-      console.log('About to call program.createNftOrigin with params:', {
-        tokenId: new BN(tokenId),
-        originChain: new BN(originChain),
-        originTokenId: new BN(originTokenId),
-        metadataUri
-      });
-      
-      // Validate that BN objects are properly created
-      let tokenIdBN: any;
-      let originChainBN: any;
-      let originTokenIdBN: any;
-      
-      try {
-        tokenIdBN = new BN(tokenId);
-        originChainBN = new BN(originChain);
-        originTokenIdBN = new BN(originTokenId);
-      } catch (error) {
-        console.warn('Anchor BN failed, trying fallback BN implementation:', error);
-        tokenIdBN = new BN_JS(tokenId);
-        originChainBN = new BN_JS(originChain);
-        originTokenIdBN = new BN_JS(originTokenId);
-      }
-      
-      console.log('Validated BN objects:', {
-        tokenIdBN: tokenIdBN.toString(),
-        originChainBN: originChainBN.toString(),
-        originTokenIdBN: originTokenIdBN.toString(),
-        tokenIdBNType: typeof tokenIdBN,
-        originChainBNType: typeof originChainBN,
-        originTokenIdBNType: typeof originTokenIdBN
-      });
-      
-      // Validate that BN objects have the expected methods
-      if (!tokenIdBN.toArrayLike || !originChainBN.toArrayLike || !originTokenIdBN.toArrayLike) {
-        throw new Error('BN objects are missing required methods. This indicates a BN library issue.');
-      }
-      
-      console.log('BN objects validated successfully - all required methods present');
-      
-      const tx = await this.program.methods
-        .createNftOrigin(
-          tokenIdBN,
-          originChainBN,
-          originTokenIdBN,
-          metadataUri
-        )
-        .accounts({
-          programState: programStatePDA,
-          nftOrigin: nftOriginPDA,
-          mint: mint,
-          payer: this.wallet.publicKey,
-          systemProgram: web3.SystemProgram.programId,
-        })
-        .rpc();
-
-      console.log('NFT origin created successfully:', tx);
-      return tx;
-    } catch (error: any) {
-      console.error('Error creating NFT origin:', error);
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name,
-        constructor: error.constructor?.name
-      });
-      
-      // Check if it's a specific type of error
-      if (error.message && error.message.includes('toArrayLike')) {
-        console.error('This appears to be a BN encoding error. Check that all parameters are properly wrapped in BN objects.');
-      }
-      
+      console.error('=== CREATE MINT AND NFT ERROR END ===');
       throw error;
     }
   }
@@ -908,6 +720,7 @@ export class UniversalNFTClient {
     destinationChain: number;
     destinationChainName: string;
     destinationOwner: string;
+    destinationTxHash: string | null;
     status: 'pending' | 'completed' | 'failed';
     logs: string[];
   }> {
@@ -987,6 +800,8 @@ export class UniversalNFTClient {
       logs.push(`Gateway Program: ZETAjseVjuFsxdRxo6MmTCvqFwb3ZHUx56Co3vCmGis`);
 
       // Chain-specific transaction details
+      let explorerUrl = '';
+      let explorerTxBase = '';
       if (destinationChain === CHAIN_IDS.ZETACHAIN_TESTNET) {
         logs.push('');
         logs.push(`=== ZETACHAIN TRANSACTION INFO ===`);
@@ -994,7 +809,9 @@ export class UniversalNFTClient {
         logs.push(`Chain ID: 7001`);
         logs.push(`Gateway Program: ZETAjseVjuFsxdRxo6MmTCvqFwb3ZHUx56Co3vCmGis`);
         logs.push(`Message Recipient: ${destinationOwnerStr}`);
-        logs.push(`Explorer: https://explorer.zetachain.com/`);
+        explorerUrl = `https://explorer.zetachain.com/address/${destinationOwnerStr}`;
+        explorerTxBase = `https://explorer.zetachain.com`;
+        logs.push(`Explorer: ${explorerUrl}`);
       } else if ([CHAIN_IDS.ETHEREUM_SEPOLIA, CHAIN_IDS.BSC_TESTNET, CHAIN_IDS.POLYGON_AMOY, CHAIN_IDS.ARBITRUM_SEPOLIA].includes(destinationChain as any)) {
         logs.push('');
         logs.push(`=== EVM CHAIN TRANSACTION INFO ===`);
@@ -1002,6 +819,33 @@ export class UniversalNFTClient {
         logs.push(`Chain ID: ${destinationChain}`);
         logs.push(`Gateway Program: ZETAjseVjuFsxdRxo6MmTCvqFwb3ZHUx56Co3vCmGis`);
         logs.push(`Message Recipient: ${destinationOwnerStr}`);
+        explorerUrl = `https://explorer.zetachain.com/address/${destinationOwnerStr}`;
+        explorerTxBase = `https://explorer.zetachain.com`;
+        logs.push(`Explorer: ${explorerUrl}`);
+      }
+
+      // Best-effort: try to fetch a recent tx hash for the recipient from a Blockscout-compatible API (if available)
+      let destinationTxHash: string | null = null;
+      try {
+        if (destinationChain === CHAIN_IDS.ZETACHAIN_TESTNET) {
+          const apiBase = (import.meta as any).env?.VITE_ZETA_BLOCKSCOUT_API || 'https://explorer.zetachain.com/api';
+          const res = await fetch(`${apiBase}?module=account&action=txlist&address=${destinationOwnerStr}&sort=desc`);
+          const data = await res.json();
+          if (data && data.status === '1' && Array.isArray(data.result) && data.result.length > 0) {
+            destinationTxHash = data.result[0].hash;
+          }
+        }
+      } catch (e) {
+        // Ignore failures; show null and keep logs informative
+      }
+
+      if (destinationTxHash) {
+        logs.push(`Destination Tx Hash: ${destinationTxHash}`);
+        if (explorerTxBase) {
+          logs.push(`Tx Link: ${explorerTxBase}/tx/${destinationTxHash}`);
+        }
+      } else {
+        logs.push(`Destination Tx Hash: Not yet available (await processing or ensure a universal app emits events)`);
       }
 
       const result = {
@@ -1009,6 +853,7 @@ export class UniversalNFTClient {
         destinationChain,
         destinationChainName: getChainName(destinationChain),
         destinationOwner: destinationOwnerStr,
+        destinationTxHash,
         status: 'pending' as const,
         logs
       };

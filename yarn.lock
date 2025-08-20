@@ -3022,6 +3022,11 @@
     "@xrplf/isomorphic" "^1.0.1"
     ripple-keypairs "^2.0.0"
 
+"@zetachain/standard-contracts@1.0.0-rc2":
+  version "1.0.0-rc2"
+  resolved "https://registry.yarnpkg.com/@zetachain/standard-contracts/-/standard-contracts-1.0.0-rc2.tgz#beb2d941741c1a7af6720bc72864eed5d8b3f07a"
+  integrity sha512-C6P8e8lX/eDoi2+iUFOPnAU84Bp6NE+mgdSrdaSRqJZYBTDIfYm6OJ1zDQNMmSpTsr6REjrqkam/qZLhwV+5pg==
+
 abitype@1.0.8, abitype@^1.0.6, abitype@^1.0.8:
   version "1.0.8"
   resolved "https://registry.yarnpkg.com/abitype/-/abitype-1.0.8.tgz#3554f28b2e9d6e9f35eb59878193eabd1b9f46ba"

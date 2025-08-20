@@ -3,8 +3,7 @@ import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
 import { UniversalNFTClient, ProgramState, NFTOrigin } from '../lib/program';
 import { SolanaUtils } from '../lib/utils';
-import * as web3 from '@solana/web3.js';
-import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from '@solana/spl-token';
+
 
 export const useProgram = () => {
   const { connection } = useConnection();
@@ -74,8 +73,8 @@ export const useProgram = () => {
     }
   }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
 
-  // Create mint account
-  const createMint = useCallback(async (decimals: number) => {
+  // Create mint account and mint NFT in one transaction
+  const createMintAndNFT = useCallback(async (uri: string, decimals: number) => {
     if (!wallet.connected || !connection || !wallet.publicKey) {
       throw new Error('Wallet not connected');
     }
@@ -86,132 +85,16 @@ export const useProgram = () => {
       setSuccess(null);
       
       const client = new UniversalNFTClient(connection, wallet);
-      const { signature, mintAddress } = await client.createMint(decimals);
+      const result = await client.createMintAndNFT(uri, decimals);
       
-      setSuccess(`Mint account created! Address: ${mintAddress} | Signature: ${signature}`);
-      
-      // Reload data after successful transaction
-      setTimeout(loadProgramData, 2000);
-      
-      return { signature, mintAddress };
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to create mint account';
-      setError(errorMessage);
-      throw new Error(errorMessage);
-    } finally {
-      setLoading(false);
-    }
-  }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
-
-  // Mint NFT
-  const mintNFT = useCallback(async (uri: string, mintAddress: string) => {
-    if (!wallet.connected || !connection || !wallet.publicKey) {
-      throw new Error('Wallet not connected');
-    }
-
-    if (!SolanaUtils.isValidPublicKey(mintAddress)) {
-      throw new Error('Invalid mint address format');
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      setSuccess(null);
-      
-      const client = new UniversalNFTClient(connection, wallet);
-      const mint = new PublicKey(mintAddress);
-      
-      // Get the Associated Token Account address for the mint
-      const tokenAccount = await getAssociatedTokenAddress(mint, wallet.publicKey);
-      
-      // Check if the token account already exists
-      const tokenAccountInfo = await connection.getAccountInfo(tokenAccount);
-      
-      if (!tokenAccountInfo) {
-        // Create the Associated Token Account if it doesn't exist
-        console.log('Creating Associated Token Account...');
-        const createATAInstruction = createAssociatedTokenAccountInstruction(
-          wallet.publicKey,
-          tokenAccount,
-          wallet.publicKey,
-          mint
-        );
-        
-        const createATATx = new web3.Transaction().add(createATAInstruction);
-        const signature = await wallet.sendTransaction(createATATx, connection);
-        await connection.confirmTransaction(signature);
-        console.log('Associated Token Account created:', signature);
-      }
-      
-      const signature = await client.mintNFT(uri, mint, tokenAccount);
-      
-      setSuccess(`NFT minted! Signature: ${signature}`);
+      setSuccess(`Mint and NFT created successfully! Mint Address: ${result.mintAddress} | Signature: ${result.signature}`);
       
       // Reload data after successful transaction
       setTimeout(loadProgramData, 2000);
       
-      return signature;
+      return result;
     } catch (err: any) {
-      const errorMessage = err.message || 'Failed to mint NFT';
-      setError(errorMessage);
-      throw new Error(errorMessage);
-    } finally {
-      setLoading(false);
-    }
-  }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
-
-  // Create NFT origin
-  const createNFTOrigin = useCallback(async (
-    tokenId: number,
-    originChain: number,
-    originTokenId: number,
-    metadataUri: string,
-    mintAddress: string
-  ): Promise<string> => {
-    if (!wallet.connected || !connection || !wallet.publicKey) {
-      throw new Error('Wallet not connected');
-    }
-
-    if (!SolanaUtils.isValidPublicKey(mintAddress)) {
-      throw new Error('Invalid mint address format');
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      setSuccess(null);
-      
-      console.log('useProgram: Creating NFT origin with params:', {
-        tokenId,
-        originChain,
-        originTokenId,
-        metadataUri,
-        mintAddress
-      });
-      
-      const client = new UniversalNFTClient(connection, wallet);
-      const mint = new PublicKey(mintAddress);
-      
-      console.log('useProgram: Created client and mint PublicKey:', mint.toString());
-      
-      const signature = await client.createNFTOrigin(
-        tokenId,
-        originChain,
-        originTokenId,
-        metadataUri,
-        mint
-      );
-      
-      console.log('useProgram: NFT origin created successfully:', signature);
-      setSuccess(`NFT origin created! Signature: ${signature}`);
-      
-      // Reload data after successful transaction
-      setTimeout(loadProgramData, 2000);
-      
-      return signature;
-    } catch (err: any) {
-      console.error('useProgram: Error creating NFT origin:', err);
-      const errorMessage = err.message || 'Failed to create NFT origin';
+      const errorMessage = err.message || 'Failed to create mint and NFT';
       setError(errorMessage);
       throw new Error(errorMessage);
     } finally {
@@ -408,9 +291,7 @@ export const useProgram = () => {
     
     // Actions
     initialize,
-    createMint,
-    mintNFT,
-    createNFTOrigin,
+    createMintAndNFT,
     initiateTransferWithLogging,
     receiveMessage,
     pauseProgram,
