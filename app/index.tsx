@@ -141,12 +141,12 @@ const AppContent: React.FC = () => {
 
   // Convert NFT origins to frontend format
   const frontendNFTOrigins: FrontendNFTOrigin[] = nftOrigins.map(origin => ({
-    tokenId: safeBNToNumber(origin.tokenId),
-    originChain: origin.originChain,
-    originTokenId: safeBNToNumber(origin.originTokenId),
-    metadataUri: origin.metadataUri,
+    tokenId: safeBNToNumber(origin.token_id),
+    originChain: origin.origin_chain,
+    originTokenId: safeBNToNumber(origin.origin_token_id),
+    metadataUri: origin.metadata_uri,
     mint: origin.mint.toString(),
-    createdAt: safeBNToNumber(origin.createdAt),
+    createdAt: safeBNToNumber(origin.created_at),
     bump: origin.bump
   }))
 
