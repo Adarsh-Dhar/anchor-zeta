@@ -37,7 +37,8 @@ const AppContent: React.FC = () => {
     clearMessages,
     isConnected,
     crossChainLogs,
-    initiateTransferWithLogging
+    initiateTransferWithLogging,
+    checkNFTExists
   } = useProgram()
 
   const [activeTab, setActiveTab] = useState('overview')
@@ -49,8 +50,7 @@ const AppContent: React.FC = () => {
     nextTokenId: 1
   })
   const [mintForm, setMintForm] = useState({
-    uri: '',
-    mint: ''
+    uri: ''
   })
   const [createMintForm, setCreateMintForm] = useState({
     decimals: 0
@@ -67,6 +67,10 @@ const AppContent: React.FC = () => {
     message: '',
     mint: ''
   })
+
+  // NFT existence check state
+  const [nftCheckResult, setNftCheckResult] = useState<{ exists: boolean; details?: any; error?: string } | null>(null)
+  const [checkingNFT, setCheckingNFT] = useState(false)
 
   // Safe conversion function for BN to number or string
   const safeBNToNumber = (bn: any): number | string => {
@@ -176,31 +180,31 @@ const AppContent: React.FC = () => {
     e.preventDefault()
     
     // Validate inputs
-    if (createMintForm.decimals === undefined || isNaN(createMintForm.decimals)) {
-      alert('Please enter a valid number of decimals');
-      return;
-    }
-    
-    if (createMintForm.decimals < 0 || createMintForm.decimals > 9) {
-      alert('Decimals must be between 0 and 9');
-      return;
-    }
-    
     if (!mintForm.uri.trim()) {
       alert('Please enter a metadata URI');
       return;
     }
     
     try {
-      // For the combined function, we need both URI and decimals
       const result = await createMintAndNFT(mintForm.uri, createMintForm.decimals)
-      if (result?.mintAddress) {
-        setCreatedMintAddress(result.mintAddress)
-        setCreatedTokenId(result.tokenId)
-        // Automatically populate the mint form and transfer form
-        setMintForm(prev => ({ ...prev, mint: result.mintAddress }))
-        setTransferForm(prev => ({ ...prev, tokenId: result.tokenId }))
-      }
+      
+      // Set the created mint address and token ID
+      setCreatedMintAddress(result.mintAddress)
+      setCreatedTokenId(result.tokenId)
+      
+      // Auto-populate the transfer form with the created token ID
+      setTransferForm({
+        ...transferForm,
+        tokenId: result.tokenId
+      })
+      
+      // Clear the mint form
+      setMintForm({
+        uri: ''
+      })
+      
+      // Show success message
+      alert(`NFT created successfully!\nMint Address: ${result.mintAddress}\nToken ID: ${result.tokenId}\n\nYou can now use this Token ID for cross-chain transfer.`)
     } catch (err) {
       // Error is already handled by the hook
     }
@@ -212,11 +216,6 @@ const AppContent: React.FC = () => {
     // Validate inputs
     if (!transferForm.tokenId || isNaN(transferForm.tokenId)) {
       alert('Please enter a valid token ID');
-      return;
-    }
-    
-    if (!transferForm.destinationChain || isNaN(transferForm.destinationChain)) {
-      alert('Please enter a valid destination chain');
       return;
     }
     
@@ -236,6 +235,41 @@ const AppContent: React.FC = () => {
       });
     } catch (err) {
       // Error is already handled by the hook
+    }
+  }
+
+  const handleCheckNFT = async () => {
+    if (!transferForm.tokenId || isNaN(transferForm.tokenId)) {
+      alert('Please enter a valid token ID');
+      return;
+    }
+    
+    try {
+      setCheckingNFT(true);
+      setNftCheckResult(null);
+      
+      // Use the checkNFTExists method from the hook
+      const result = await checkNFTExists(transferForm.tokenId);
+      setNftCheckResult(result);
+    } catch (err: any) {
+      setNftCheckResult({
+        exists: false,
+        error: err.message || 'Failed to check NFT existence'
+      });
+    } finally {
+      setCheckingNFT(false);
+    }
+  }
+
+  const handleAutoFillNFT = () => {
+    if (frontendNFTOrigins.length > 0) {
+      // Use the first available NFT
+      const firstNFT = frontendNFTOrigins[0];
+      setTransferForm({
+        ...transferForm,
+        tokenId: typeof firstNFT.tokenId === 'number' ? firstNFT.tokenId : 1
+      });
+      setNftCheckResult(null); // Clear previous check result
     }
   }
 
@@ -373,6 +407,48 @@ const AppContent: React.FC = () => {
               </div>
             )}
             
+            {/* User's NFTs Section */}
+            <div className="bg-white rounded-xl shadow-lg p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Your NFTs</h3>
+              {frontendNFTOrigins.length === 0 ? (
+                <div className="text-center py-8">
+                  <div className="text-gray-400 text-6xl mb-4">🎨</div>
+                  <p className="text-gray-600 mb-2">No NFTs created yet</p>
+                  <p className="text-sm text-gray-500">
+                    Go to the "Create Mint & NFT" tab to create your first NFT
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-600 mb-4">
+                    You have {frontendNFTOrigins.length} NFT{frontendNFTOrigins.length !== 1 ? 's' : ''} available for cross-chain transfer:
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {frontendNFTOrigins.map((nft, index) => (
+                      <div key={index} className="p-4 bg-gray-50 rounded-lg border">
+                        <div className="flex justify-between items-start mb-2">
+                          <h4 className="font-medium text-gray-900">Token ID {nft.tokenId}</h4>
+                          <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                            Available
+                          </span>
+                        </div>
+                        <div className="space-y-1 text-sm text-gray-600">
+                          <p><strong>Mint:</strong> {nft.mint.slice(0, 8)}...{nft.mint.slice(-8)}</p>
+                          <p><strong>Origin Chain:</strong> {nft.originChain}</p>
+                          <p><strong>Metadata:</strong> {nft.metadataUri}</p>
+                        </div>
+                        <div className="mt-3 pt-3 border-t border-gray-200">
+                          <p className="text-xs text-gray-500">
+                            💡 Use this Token ID in the "Cross-Chain Transfer" tab
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            
             <div className="bg-white rounded-xl shadow-lg p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Supported Chain IDs</h3>
               <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
@@ -465,10 +541,22 @@ const AppContent: React.FC = () => {
         return (
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Create Mint & Mint NFT</h3>
+            
+            {/* Workflow guidance */}
+            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+              <h4 className="text-sm font-medium text-green-800 mb-2">🎯 Next Steps After Creating NFT:</h4>
+              <ol className="text-sm text-green-700 space-y-1 list-decimal list-inside">
+                <li><strong>NFT Created:</strong> Your NFT will be created with a simple sequential token ID (1, 2, 3, etc.)</li>
+                <li><strong>Auto-Populate:</strong> The transfer form will automatically be filled with your new token ID</li>
+                <li><strong>Transfer Ready:</strong> Go to the "Cross-Chain Transfer" tab to transfer your NFT</li>
+              </ol>
+            </div>
+            
             <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ What this does:</h4>
               <ul className="text-sm text-blue-700 space-y-1">
                 <li>• Creates a new SPL Token mint account with the specified decimals</li>
+                <li>• <strong>Mint address is generated automatically</strong> - you don't need to provide it</li>
                 <li>• Mints 1 NFT token to your wallet</li>
                 <li>• Creates metadata for the NFT (name, symbol, URI)</li>
                 <li>• Creates a master edition for the NFT</li>
@@ -540,7 +628,7 @@ const AppContent: React.FC = () => {
                         setCreatedMintAddress(null)
                         setCreatedTokenId(null)
                         setCreateMintForm({ decimals: 0 })
-                        setMintForm({ uri: '', mint: '' })
+                        setMintForm({ uri: '' })
                       }}
                       className="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md transition-colors"
                     >
@@ -566,6 +654,28 @@ const AppContent: React.FC = () => {
         return (
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Initiate Cross-Chain Transfer</h3>
+            
+            {/* Step-by-step instructions */}
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h4 className="text-sm font-medium text-blue-800 mb-2">📋 Transfer Workflow:</h4>
+              <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
+                <li><strong>Create NFT:</strong> First, go to the "Create Mint & NFT" tab to mint an NFT</li>
+                <li><strong>Check NFT:</strong> Use the "Check NFT" button below to verify your NFT exists and you have tokens</li>
+                <li><strong>Transfer:</strong> Once verified, initiate the cross-chain transfer</li>
+              </ol>
+            </div>
+            
+            {/* Token ID System Explanation */}
+            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <h4 className="text-sm font-medium text-yellow-800 mb-2">🔢 Token ID System:</h4>
+              <ul className="text-sm text-yellow-700 space-y-1">
+                <li>• <strong>New NFTs:</strong> Use simple sequential IDs (1, 2, 3, etc.)</li>
+                <li>• <strong>Existing NFTs:</strong> May have complex IDs from the previous system</li>
+                <li>• <strong>How to find your token ID:</strong> Check the "Overview" tab or use the "Check NFT" button below</li>
+                <li>• <strong>Tip:</strong> The "Check NFT" button will tell you exactly what token IDs are available</li>
+              </ul>
+            </div>
+            
             <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
               <h4 className="text-sm font-medium text-green-800 mb-2">✅ ZetaChain Contract Integration Ready:</h4>
               <ul className="text-sm text-green-700 space-y-1">
@@ -580,29 +690,121 @@ const AppContent: React.FC = () => {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Token ID</label>
                 {createdTokenId && (
-                  <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                    <p className="text-sm text-blue-700">
-                      <strong>Available NFT:</strong> Token ID {createdTokenId} (Mint: {createdMintAddress?.slice(0, 8)}...{createdMintAddress?.slice(-8)})
+                  <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <p className="text-sm text-green-700">
+                      <strong>✅ NFT Created Successfully!</strong>
+                    </p>
+                    <div className="text-sm text-green-600 mt-1 space-y-1">
+                      <p><strong>Token ID:</strong> {createdTokenId}</p>
+                      <p><strong>Mint Address:</strong> {createdMintAddress?.slice(0, 8)}...{createdMintAddress?.slice(-8)}</p>
+                    </div>
+                    <p className="text-xs text-green-600 mt-2">
+                      💡 <strong>This Token ID is automatically filled below and ready for transfer!</strong>
                     </p>
                   </div>
                 )}
-                <input
-                  type="number"
-                  value={transferForm.tokenId}
-                  onChange={(e) => {
-                    const value = parseInt(e.target.value);
-                    if (!isNaN(value)) {
-                      setTransferForm({...transferForm, tokenId: value});
-                    }
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  min="1"
-                  required
-                />
-                {!createdTokenId && (
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    value={transferForm.tokenId}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value);
+                      if (!isNaN(value)) {
+                        setTransferForm({...transferForm, tokenId: value});
+                        setNftCheckResult(null); // Clear previous check result
+                      }
+                    }}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    min="1"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCheckNFT}
+                    disabled={checkingNFT || !isConnected}
+                    className="px-4 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white font-medium rounded-lg disabled:cursor-not-allowed"
+                  >
+                    {checkingNFT ? 'Checking...' : 'Check NFT'}
+                  </button>
+                  {frontendNFTOrigins.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleAutoFillNFT}
+                      disabled={!isConnected}
+                      className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-medium rounded-lg disabled:cursor-not-allowed"
+                      title="Auto-fill with first available NFT"
+                    >
+                      Auto-fill
+                    </button>
+                  )}
+                </div>
+                
+                {/* Button explanations */}
+                {frontendNFTOrigins.length > 0 && (
+                  <div className="mt-2 text-xs text-gray-500">
+                    <p>💡 <strong>Auto-fill:</strong> Automatically fills the token ID with your first available NFT</p>
+                    <p>💡 <strong>Check NFT:</strong> Verifies if a specific token ID exists and shows details</p>
+                  </div>
+                )}
+                
+                {/* NFT Check Results */}
+                {nftCheckResult && (
+                  <div className={`mt-3 p-3 rounded-lg border ${
+                    nftCheckResult.exists ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+                  }`}>
+                    {nftCheckResult.exists ? (
+                      <div>
+                        <p className="text-sm font-medium text-green-700 mb-2">✅ NFT Found</p>
+                        <div className="text-sm text-green-600 space-y-1">
+                          <p><strong>Token ID:</strong> {nftCheckResult.details.tokenId}</p>
+                          <p><strong>Mint Address:</strong> {nftCheckResult.details.mint}</p>
+                          <p><strong>Token Balance:</strong> {nftCheckResult.details.tokenBalance}</p>
+                          <p><strong>Metadata URI:</strong> {nftCheckResult.details.metadataUri}</p>
+                        </div>
+                        {nftCheckResult.details.tokenBalance < 1 && (
+                          <p className="text-sm text-red-600 mt-2">
+                            ⚠️ You don't have any tokens to transfer. Please mint an NFT first.
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-sm font-medium text-red-700 mb-2">❌ NFT Not Found</p>
+                        <p className="text-sm text-red-600">{nftCheckResult.error}</p>
+                        <p className="text-sm text-red-600 mt-2">
+                          💡 <strong>Solution:</strong> Create an NFT first using the "Create Mint & NFT" tab above.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {!createdTokenId && !nftCheckResult && (
                   <p className="mt-1 text-sm text-gray-500">
-                    You need to create an NFT first before you can transfer it.
+                    You need to create an NFT first before you can transfer it. Use the "Check NFT" button to verify what's available.
                   </p>
+                )}
+                
+                {/* Helpful guidance for finding NFT token IDs */}
+                {frontendNFTOrigins.length > 0 && (
+                  <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-sm text-blue-700 mb-2">
+                      💡 <strong>Available NFTs Found:</strong> You have {frontendNFTOrigins.length} NFT{frontendNFTOrigins.length !== 1 ? 's' : ''} available
+                    </p>
+                    <div className="text-xs text-blue-600 space-y-1">
+                      {frontendNFTOrigins.slice(0, 3).map((nft, index) => (
+                        <p key={index}>
+                          • Token ID {nft.tokenId}: {nft.mint.slice(0, 8)}...{nft.mint.slice(-8)}
+                        </p>
+                      ))}
+                      {frontendNFTOrigins.length > 3 && (
+                        <p>• ... and {frontendNFTOrigins.length - 3} more</p>
+                      )}
+                    </div>
+                    <p className="text-xs text-blue-600 mt-2">
+                      💡 <strong>Tip:</strong> Use the "Check NFT" button above to verify any token ID before transfer
+                    </p>
+                  </div>
                 )}
               </div>
               <div>

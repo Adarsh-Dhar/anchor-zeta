@@ -95,16 +95,10 @@ fn nft_origin_seed(token_id: u64) -> Vec<u8> {
     seed
 }
 
-fn generate_token_id(mint: &Pubkey, next_token_id: u64) -> u64 {
-    let mut data = Vec::new();
-    data.extend_from_slice(&mint.to_bytes());
-    data.extend_from_slice(&next_token_id.to_le_bytes());
-
-    let hash = anchor_lang::solana_program::hash::hash(&data);
-
-    let mut bytes = [0u8; 8];
-    bytes.copy_from_slice(&hash.to_bytes()[..8]);
-    u64::from_le_bytes(bytes)
+fn generate_token_id(_mint: &Pubkey, next_token_id: u64) -> u64 {
+    // Use simple sequential token IDs instead of complex hash-based IDs
+    // This makes the system much more user-friendly and predictable
+    next_token_id
 }
 
 #[program]
@@ -137,17 +131,21 @@ pub mod universal_nft {
         ctx: Context<CreateMintAndNFT>,
         uri: String,
         decimals: u8,
+        token_id: u64,
     ) -> Result<()> {
         require!(!ctx.accounts.program_state.paused, ErrorCode::ProgramPaused);
         
         let program_state = &mut ctx.accounts.program_state;
         let clock = Clock::get()?;
 
+        // Validate that the provided token_id matches the expected next_token_id
+        require_eq!(token_id, program_state.next_token_id, ErrorCode::NextTokenIdMismatch);
+
         // Step 1: Create mint account (this is handled by the account constraint)
         // The mint account is already initialized by the account constraint
         
         // Step 2: Mint NFT and create metadata
-        let token_id = generate_token_id(
+        let final_token_id = generate_token_id(
             &ctx.accounts.mint.key(),
             program_state.next_token_id
         );
@@ -202,8 +200,8 @@ pub mod universal_nft {
             .max_supply(0)
             .invoke()?;
         
-        // Step 3: Create NFT origin record
-        let token_id_bytes = token_id.to_le_bytes();
+        // Step 3: Create NFT origin record manually using CPI
+        let token_id_bytes = final_token_id.to_le_bytes();
         let (nft_origin_pda, nft_origin_bump) = Pubkey::find_program_address(
             &[b"nft_origin", &token_id_bytes],
             ctx.program_id,
@@ -211,11 +209,12 @@ pub mod universal_nft {
         
         // Validate that the provided nft_origin account matches the expected PDA
         require_keys_eq!(ctx.accounts.nft_origin.key(), nft_origin_pda, ErrorCode::NFTOriginNotFound);
-
+        
+        // Create the NFT origin account using CPI
         let origin_record = NFTOrigin {
-            token_id,
+            token_id: final_token_id,
             origin_chain: CHAIN_ID_SOLANA_DEVNET,
-            origin_token_id: token_id,
+            origin_token_id: final_token_id,
             metadata_uri: uri.clone(),
             mint: ctx.accounts.mint.key(),
             created_at: clock.unix_timestamp,
@@ -256,15 +255,15 @@ pub mod universal_nft {
         });
         
         emit!(NFTMinted {
-            token_id,
+            token_id: final_token_id,
             mint: ctx.accounts.mint.key(),
             metadata_uri: uri.clone(),
         });
         
         emit!(NFTOriginCreated {
-            token_id,
+            token_id: final_token_id,
             origin_chain: CHAIN_ID_SOLANA_DEVNET,
-            origin_token_id: token_id,
+            origin_token_id: final_token_id,
             mint: ctx.accounts.mint.key(),
             metadata_uri: uri,
         });
@@ -437,7 +436,7 @@ pub struct Initialize<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(uri: String, decimals: u8)]
+#[instruction(uri: String, decimals: u8, token_id: u64)]
 pub struct CreateMintAndNFT<'info> {
     #[account(
         mut,
@@ -446,8 +445,7 @@ pub struct CreateMintAndNFT<'info> {
     )]
     pub program_state: Account<'info, ProgramState>,
     
-    /// CHECK: PDA is derived and validated inside the instruction before use; account is created and
-    /// initialized by this instruction and only written by the program
+    /// CHECK: This account will be created by the program using CPI
     #[account(mut)]
     pub nft_origin: AccountInfo<'info>,
     

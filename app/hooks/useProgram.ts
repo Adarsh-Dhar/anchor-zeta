@@ -102,7 +102,79 @@ export const useProgram = () => {
     }
   }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
 
-  // Enhanced cross-chain transfer with destination logging
+  // Check if NFT exists before transfer
+  const checkNFTExists = useCallback(async (tokenId: number) => {
+    if (!wallet.connected || !connection) {
+      throw new Error('Wallet not connected');
+    }
+
+    try {
+      const client = new UniversalNFTClient(connection, wallet);
+      return await client.checkNFTExists(tokenId);
+    } catch (err: any) {
+      const errorMessage = err.message || 'Failed to check NFT existence';
+      setError(errorMessage);
+      throw new Error(errorMessage);
+    }
+  }, [wallet.connected, connection]);
+
+  // Initiate cross-chain transfer with validation
+  const initiateTransferWithValidation = useCallback(async (tokenId: number, destinationChain: number, destinationOwner: string) => {
+    if (!wallet.connected || !connection) {
+      throw new Error('Wallet not connected');
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      setSuccess(null);
+      
+      // First check if the NFT exists
+      const nftCheck = await checkNFTExists(tokenId);
+      if (!nftCheck.exists) {
+        throw new Error(nftCheck.error || 'NFT not found');
+      }
+      
+      // Check if user has tokens to transfer
+      if (nftCheck.details && nftCheck.details.tokenBalance < 1) {
+        throw new Error(`You don't have enough tokens for NFT ${tokenId}. Current balance: ${nftCheck.details.tokenBalance}`);
+      }
+      
+      // Convert destination owner address to bytes
+      const destinationOwnerBytes = new Uint8Array(32);
+      if (destinationOwner.startsWith('0x')) {
+        const addressBytes = new Uint8Array(Buffer.from(destinationOwner.slice(2), 'hex'));
+        destinationOwnerBytes.set(addressBytes.slice(0, 20), 0);
+      } else {
+        // Handle Solana addresses - convert from base58 to bytes
+        try {
+          const publicKey = new PublicKey(destinationOwner);
+          const addressBytes = publicKey.toBytes();
+          destinationOwnerBytes.set(addressBytes.slice(0, 32), 0);
+        } catch (e) {
+          throw new Error('Invalid destination owner address format');
+        }
+      }
+      
+      const client = new UniversalNFTClient(connection, wallet);
+      const signature = await client.initiateCrossChainTransfer(tokenId, destinationChain, destinationOwnerBytes);
+      
+      setSuccess(`Cross-chain transfer initiated successfully! Signature: ${signature}`);
+      
+      // Reload data after successful transaction
+      setTimeout(loadProgramData, 2000);
+      
+      return signature;
+    } catch (err: any) {
+      const errorMessage = err.message || 'Failed to initiate cross-chain transfer';
+      setError(errorMessage);
+      throw new Error(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet.connected, connection, checkNFTExists, loadProgramData]);
+
+  // Initiate cross-chain transfer with logging
   const initiateTransferWithLogging = useCallback(async (
     tokenId: number,
     destinationChain: number,
@@ -293,6 +365,7 @@ export const useProgram = () => {
     initialize,
     createMintAndNFT,
     initiateTransferWithLogging,
+    initiateTransferWithValidation,
     receiveMessage,
     pauseProgram,
     unpauseProgram,
@@ -302,6 +375,7 @@ export const useProgram = () => {
     // Computed values
     isConnected: wallet.connected,
     wallet: wallet.publicKey?.toString(),
+    checkNFTExists
   };
 };
 

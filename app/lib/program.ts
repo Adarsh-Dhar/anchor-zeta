@@ -172,25 +172,24 @@ export class UniversalNFTClient {
         METADATA_PROGRAM_ID
       );
       
-      // Generate the token_id that will be used (same logic as in the program)
-      const tokenIdData = Buffer.concat([
-        mintKeypair.publicKey.toBuffer(),
-        Buffer.from(currentNextTokenId.toArray('le', 8))
-      ]);
+      // The program now uses program_state.next_token_id in the PDA seeds
+      // So we use the CURRENT next_token_id (not the predicted one) for PDA derivation
+      const currentTokenIdForPDA = currentNextTokenId.toNumber();
+      console.log('Client-side PDA derivation:');
+      console.log('Using current next_token_id for PDA:', currentTokenIdForPDA);
+      console.log('Current next_token_id from program state:', currentNextTokenId.toString());
       
-      // Use Web Crypto API for SHA256 hash (browser compatible)
-      const tokenIdHash = await crypto.subtle.digest('SHA-256', tokenIdData);
-      const tokenIdHashArray = new Uint8Array(tokenIdHash);
-      const predictedTokenId = new DataView(tokenIdHashArray.buffer).getBigUint64(0, true); // true for little-endian
-      console.log('Predicted token_id:', predictedTokenId.toString());
-      
-      // Derive the correct nft_origin PDA using the predicted token_id
+      // Derive the nft_origin PDA using the CURRENT next_token_id
       const tokenIdBuffer = Buffer.alloc(8);
-      tokenIdBuffer.writeBigUInt64LE(predictedTokenId);
+      tokenIdBuffer.writeBigUInt64LE(BigInt(currentTokenIdForPDA), 0); // Write as little-endian u64 (8 bytes)
+      console.log('Token ID buffer (hex):', tokenIdBuffer.toString('hex'));
+      console.log('Token ID buffer length:', tokenIdBuffer.length);
+      
       const [nftOriginPDA] = PublicKey.findProgramAddressSync(
         [Buffer.from('nft_origin'), tokenIdBuffer],
         PROGRAM_ID
       );
+      console.log('Client-derived PDA:', nftOriginPDA.toString());
       
       console.log('Derived PDAs:', {
         metadataPDA: metadataPDA.toString(),
@@ -215,7 +214,7 @@ export class UniversalNFTClient {
       });
       
       const tx = await this.program.methods
-        .createMintAndNft(uri, decimals)
+        .createMintAndNft(uri, decimals, new BN(currentTokenIdForPDA))
         .accounts({
           programState: programStatePDA,
           nftOrigin: nftOriginPDA,
@@ -237,11 +236,15 @@ export class UniversalNFTClient {
       console.log('Transaction successful:', tx);
       console.log('=== CREATE MINT AND NFT END ===');
       
-      // Use the predicted token ID
+      // The token ID that was used is the current next_token_id (before increment)
+      const actualTokenId = currentTokenIdForPDA;
+      console.log('Actual token ID used:', actualTokenId);
+      
+      // Use the token ID that was used for the PDA
       return {
         signature: tx,
         mintAddress: mintKeypair.publicKey.toString(),
-        tokenId: Number(predictedTokenId)
+        tokenId: actualTokenId
       };
     } catch (error: any) {
       console.error('=== CREATE MINT AND NFT ERROR ===');
@@ -266,19 +269,36 @@ export class UniversalNFTClient {
     try {
       console.log('=== INITIATE CROSS-CHAIN TRANSFER START ===');
       console.log('Token ID:', tokenId);
+      console.log('Token ID type:', typeof tokenId);
       console.log('Destination Chain:', destinationChain);
       console.log('Destination Owner (bytes):', destinationOwner);
       
       const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
       console.log('Program State PDA:', programStatePDA.toString());
       
+      // Get current program state for debugging
+      const currentProgramState = await (this.program.account as any).programState.fetch(programStatePDA);
+      console.log('Current program state next_token_id:', currentProgramState.nextTokenId.toString());
+      
       const [nftOriginPDA] = UniversalNFTClient.getNFTOriginPDA(tokenId);
       console.log('NFT Origin PDA:', nftOriginPDA.toString());
+      console.log('NFT Origin PDA seeds:', ['nft_origin', tokenId]);
       
-      // Get the actual mint address from the NFT origin record
-      console.log('Fetching NFT origin account...');
-      const nftOriginAccount = await (this.program.account as any).nftOrigin.fetch(nftOriginPDA);
-      console.log('NFT Origin Account:', nftOriginAccount);
+      // Check if the NFT origin account exists before proceeding
+      console.log('Checking if NFT origin account exists...');
+      let nftOriginAccount;
+      try {
+        nftOriginAccount = await (this.program.account as any).nftOrigin.fetch(nftOriginPDA);
+        console.log('NFT Origin Account:', nftOriginAccount);
+        console.log('NFT Origin Account token_id:', nftOriginAccount.token_id.toString());
+        console.log('NFT Origin Account mint:', nftOriginAccount.mint.toString());
+      } catch (error: any) {
+        console.log('Error fetching NFT origin account:', error);
+        if (error.message && error.message.includes('Account does not exist')) {
+          throw new Error(`NFT with token ID ${tokenId} does not exist. Please create an NFT first using the "Create Mint & NFT" tab.`);
+        }
+        throw error;
+      }
       
       if (!nftOriginAccount || !nftOriginAccount.mint) {
         throw new Error('NFT origin account not found or invalid');
@@ -291,6 +311,25 @@ export class UniversalNFTClient {
       console.log('Getting associated token address...');
       const userTokenAccount = await this.getAssociatedTokenAddress(mint);
       console.log('User Token Account:', userTokenAccount.toString());
+      
+      // Check if user has tokens to transfer
+      try {
+        const tokenAccountInfo = await this.program.provider.connection.getAccountInfo(userTokenAccount);
+        if (!tokenAccountInfo) {
+          throw new Error(`You don't have any tokens for NFT ${tokenId}. Please mint an NFT first.`);
+        }
+        
+        // Decode token account to check balance
+        const tokenAccount = await (this.program.account as any).tokenAccount.fetch(userTokenAccount);
+        if (!tokenAccount || tokenAccount.amount < 1) {
+          throw new Error(`You don't have enough tokens for NFT ${tokenId}. Current balance: ${tokenAccount?.amount || 0}`);
+        }
+      } catch (error: any) {
+        if (error.message && error.message.includes("doesn't have any tokens")) {
+          throw new Error(`You don't have any tokens for NFT ${tokenId}. Please mint an NFT first.`);
+        }
+        throw error;
+      }
       
       // Convert Uint8Array to [u8; 32] format expected by the program
       const destinationOwnerArray = new Uint8Array(32);
@@ -440,6 +479,62 @@ export class UniversalNFTClient {
     } catch (error) {
       console.error('Error fetching NFT origin:', error);
       return null;
+    }
+  }
+
+  // Check if NFT exists and get its details
+  async checkNFTExists(tokenId: number): Promise<{ exists: boolean; details?: any; error?: string }> {
+    try {
+      const [nftOriginPDA] = UniversalNFTClient.getNFTOriginPDA(tokenId);
+      
+      try {
+        const nftOriginAccount = await (this.program.account as any).nftOrigin.fetch(nftOriginPDA);
+        
+        if (nftOriginAccount && nftOriginAccount.mint) {
+          // Check if user has tokens
+          const userTokenAccount = await this.getAssociatedTokenAddress(nftOriginAccount.mint);
+          let tokenBalance = 0;
+          
+          try {
+            const tokenAccount = await (this.program.account as any).tokenAccount.fetch(userTokenAccount);
+            tokenBalance = tokenAccount?.amount || 0;
+          } catch (e) {
+            // Token account doesn't exist, balance is 0
+          }
+          
+          return {
+            exists: true,
+            details: {
+              tokenId: nftOriginAccount.token_id,
+              mint: nftOriginAccount.mint.toString(),
+              metadataUri: nftOriginAccount.metadata_uri,
+              originChain: nftOriginAccount.origin_chain,
+              originTokenId: nftOriginAccount.origin_token_id,
+              createdAt: nftOriginAccount.created_at,
+              userTokenAccount: userTokenAccount.toString(),
+              tokenBalance
+            }
+          };
+        }
+      } catch (error: any) {
+        if (error.message && error.message.includes('Account does not exist')) {
+          return {
+            exists: false,
+            error: `NFT with token ID ${tokenId} does not exist`
+          };
+        }
+        throw error;
+      }
+      
+      return {
+        exists: false,
+        error: 'NFT origin account not found or invalid'
+      };
+    } catch (error: any) {
+      return {
+        exists: false,
+        error: error.message || 'Failed to check NFT existence'
+      };
     }
   }
 
