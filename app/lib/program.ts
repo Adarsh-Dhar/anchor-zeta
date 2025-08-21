@@ -296,18 +296,64 @@ export class UniversalNFTClient {
       
       // Skipping alternative PDA checks and account enumeration
       console.log('Skipping alternative PDA checks and account enumeration...');
-      
-      // Skip NFT existence check and proceed directly with transaction
-      console.log('Skipping NFT existence check - proceeding directly with transaction...');
-      
-      // The initiateCrossChainTransfer instruction requires an existing NFT with a valid mint account
-      console.log('Creating a new mint account for the transaction...');
-      // Throw an error explaining what needs to be done
-      throw new Error('You need to create an NFT first using the "Create Mint & NFT" tab before you can perform a cross-chain transfer. The initiateCrossChainTransfer instruction requires an existing NFT with a valid mint account owned by the SPL Token program.');
-      
-      // The error has been thrown above, so this code won't execute
-      // But we need to keep the function structure
-      throw new Error('This should not be reached');
+
+      // Load NFT origin to get the real mint
+      console.log('Loading NFT origin account...');
+      const nftOriginAccount = await (this.program.account as any).nftOrigin.fetch(nftOriginPDA);
+      if (!nftOriginAccount || !nftOriginAccount.mint) {
+        throw new Error(`NFT with token ID ${tokenId} does not exist or has invalid mint`);
+      }
+      const mint = nftOriginAccount.mint as PublicKey;
+      console.log('NFT Origin mint:', mint.toString());
+
+      // Derive user ATA and ensure balance >= 1
+      const userTokenAccount = await this.getAssociatedTokenAddress(mint);
+      console.log('User Token Account (ATA):', userTokenAccount.toString());
+
+      let tokenBalance = 0;
+      try {
+        const bal = await this.program.provider.connection.getTokenAccountBalance(userTokenAccount);
+        tokenBalance = parseInt(bal.value.amount, 10) || 0;
+      } catch (_) {
+        try {
+          const parsed = await this.program.provider.connection.getParsedAccountInfo(userTokenAccount);
+          const amount = (parsed.value as any)?.data?.parsed?.info?.tokenAmount?.amount;
+          tokenBalance = amount ? parseInt(amount, 10) : 0;
+        } catch {
+          tokenBalance = 0;
+        }
+      }
+      console.log('User ATA balance:', tokenBalance);
+      if (tokenBalance < 1) {
+        throw new Error(`You don't have any tokens to transfer for token ID ${tokenId}. Please mint an NFT first or switch to the wallet that holds it.`);
+      }
+
+      // Convert Uint8Array to [u8; 32] format expected by the program
+      const destinationOwnerArray = new Uint8Array(32);
+      destinationOwnerArray.set(destinationOwner.slice(0, 32));
+      console.log('Destination Owner Array:', Array.from(destinationOwnerArray));
+
+      console.log('Calling program.initiateCrossChainTransfer...');
+      const tx = await this.program.methods
+        .initiateCrossChainTransfer(
+          new BN(tokenId),
+          new BN(destinationChain),
+          Array.from(destinationOwnerArray)
+        )
+        .accounts({
+          programState: programStatePDA,
+          nftOrigin: nftOriginPDA,
+          mint: mint,
+          userTokenAccount: userTokenAccount,
+          user: this.wallet.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          gatewayProgram: new PublicKey("ZETAjseVjuFsxdRxo6MmTCvqFwb3ZHUx56Co3vCmGis"),
+        })
+        .rpc();
+
+      console.log('Transaction successful! Signature:', tx);
+      console.log('=== INITIATE CROSS-CHAIN TRANSFER END ===');
+      return tx;
     } catch (error: any) {
       console.error('=== INITIATE CROSS-CHAIN TRANSFER ERROR ===');
       console.error('Error initiating cross-chain transfer:', error);
@@ -457,12 +503,20 @@ export class UniversalNFTClient {
           // Check if user has tokens
           const userTokenAccount = await this.getAssociatedTokenAddress(nftOriginAccount.mint);
           let tokenBalance = 0;
-          
+
           try {
-            const tokenAccount = await (this.program.account as any).tokenAccount.fetch(userTokenAccount);
-            tokenBalance = tokenAccount?.amount || 0;
-          } catch (e) {
-            // Token account doesn't exist, balance is 0
+            // Prefer on-chain RPC for SPL balances
+            const bal = await this.program.provider.connection.getTokenAccountBalance(userTokenAccount);
+            tokenBalance = parseInt(bal.value.amount, 10) || 0;
+          } catch (_) {
+            // Fallback: parsed account (in case ATA exists but balance fetch failed)
+            try {
+              const parsed = await this.program.provider.connection.getParsedAccountInfo(userTokenAccount);
+              const amount = (parsed.value as any)?.data?.parsed?.info?.tokenAmount?.amount;
+              tokenBalance = amount ? parseInt(amount, 10) : 0;
+            } catch {
+              tokenBalance = 0;
+            }
           }
           
           return {

@@ -512,7 +512,12 @@ pub struct CrossChainTransfer<'info> {
     pub nft_origin: Account<'info, NFTOrigin>,
     #[account(mut)]
     pub mint: Account<'info, Mint>,
-    #[account(mut)]
+    // Must be the caller's ATA for this mint
+    #[account(
+        mut,
+        token::mint = mint,
+        token::authority = user,
+    )]
     pub user_token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub user: Signer<'info>,
@@ -538,14 +543,17 @@ pub struct ReceiveCrossChainMessage<'info> {
         bump
     )]
     pub nft_origin: Account<'info, NFTOrigin>,
-    /// CHECK: Only the pubkey is read; actual token semantics enforced by SPL Token program CPIs
+    // Use strong types and create ATA idempotently for the recipient
     #[account(mut)]
-    pub mint: AccountInfo<'info>,
-    /// CHECK: Only used as a signer or authority pubkey; validated by the downstream CPI
-    pub mint_authority: AccountInfo<'info>,
-    /// CHECK: Only the pubkey is used; balance and ownership validated by SPL Token program CPIs
-    #[account(mut)]
-    pub recipient_token_account: AccountInfo<'info>,
+    pub mint: Account<'info, Mint>,
+    pub mint_authority: Signer<'info>,
+    #[account(
+        init,
+        payer = payer,
+        associated_token::mint = mint,
+        associated_token::authority = mint_authority,
+    )]
+    pub recipient_token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
