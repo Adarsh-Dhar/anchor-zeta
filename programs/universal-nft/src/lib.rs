@@ -13,7 +13,7 @@ use mpl_token_metadata::instructions::{
 use mpl_token_metadata::types::{DataV2, Creator, Collection, Uses};
 use std::str::FromStr;
 
-declare_id!("5baRbZmwFVrudLM8Mea3X8vavVwWEnHr9Dxfm24KqCNd");
+declare_id!("DkcNjarjaVgEpq65tHDqzNTjcxuo3PyF17sDkc4CrFnm");
 
 
 pub const ZETA_GATEWAY_PROGRAM_ID: &str = "ZETAjseVjuFsxdRxo6MmTCvqFwb3ZHUx56Co3vCmGis";
@@ -63,6 +63,49 @@ fn call_gateway<'a>(
     Ok(())
 }
 
+
+fn abi_encode_message(
+    destination: [u8; 20],
+    receiver: [u8; 20],
+    token_id: u64,
+    uri: String,
+    sender: [u8; 20]
+) -> Vec<u8> {
+    let mut message = Vec::new();
+    
+    // destination (address)
+    message.extend_from_slice(&[0u8; 12]);
+    message.extend_from_slice(&destination);
+    
+    // receiver (address)
+    message.extend_from_slice(&[0u8; 12]);
+    message.extend_from_slice(&receiver);
+    
+    // tokenId (uint256)
+    let mut token_id_bytes = [0u8; 32];
+    token_id_bytes[24..32].copy_from_slice(&token_id.to_be_bytes());
+    message.extend_from_slice(&token_id_bytes);
+    
+    // uri offset (uint256)
+    let offset = 160u64;
+    message.extend_from_slice(&offset.to_be_bytes());
+    
+    // sender (address)
+    message.extend_from_slice(&[0u8; 12]);
+    message.extend_from_slice(&sender);
+    
+    // uri length and data
+    let uri_len = uri.len() as u64;
+    message.extend_from_slice(&uri_len.to_be_bytes());
+    message.extend_from_slice(uri.as_bytes());
+    
+    // padding
+    let padding = (32 - (uri.len() % 32)) % 32;
+    message.extend_from_slice(&vec![0u8; padding]);
+    
+    message
+}
+
 // ZetaChain Testnet Chain ID Constants
 pub const CHAIN_ID_SOLANA_DEVNET: u64 = 901;
 pub const CHAIN_ID_ZETACHAIN_TESTNET: u64 = 7001;
@@ -109,11 +152,14 @@ pub mod universal_nft {
         ctx: Context<Initialize>,
         gateway: Pubkey,
         next_token_id: u64,
+        universal_nft_contract: [u8; 20],
     ) -> Result<()> {
         let program_state = &mut ctx.accounts.program_state;
         // Hardcode the admin address
         program_state.owner = Pubkey::from_str("F79VcAwM6VhL9CaZo68W1SwrkntLJpAhcbTLLzuz4g3G").unwrap();
         program_state.gateway = gateway;
+        // Set the destination chain (Zeta/EVM) contract address to call via gateway
+        program_state.universal_nft_contract = universal_nft_contract;
         program_state.next_token_id = next_token_id;
         program_state.paused = false;
         program_state.bump = ctx.bumps.program_state;
@@ -274,11 +320,12 @@ pub mod universal_nft {
     pub fn initiate_cross_chain_transfer(
         ctx: Context<CrossChainTransfer>,
         _token_id: u64,
-        destination_chain: u64,
+        zrc20_address: [u8; 20], // Change parameter to ZRC-20 address
         destination_owner: [u8; 32],
     ) -> Result<()> {
         require!(!ctx.accounts.program_state.paused, ErrorCode::ProgramPaused);
         
+        let program_state = &ctx.accounts.program_state;
         let nft_origin = &ctx.accounts.nft_origin;
         
         let burn_ctx = CpiContext::new(
@@ -292,35 +339,32 @@ pub mod universal_nft {
         
         anchor_spl::token::burn(burn_ctx, 1)?;
         
-        let cross_chain_message = CrossChainMessage {
-            token_id: nft_origin.token_id,
-            origin_chain: nft_origin.origin_chain,
-            origin_token_id: nft_origin.origin_token_id,
-            metadata_uri: nft_origin.metadata_uri.clone(),
-            recipient: destination_owner,
-        };
-
-        let message_data = cross_chain_message.try_to_vec()?;
+        let receiver_evm: [u8; 20] = destination_owner[0..20].try_into().unwrap();
+        let sender_evm = [0u8; 20]; // Not used for Solana-originated transfers
         
-        let mut evm_recipient = [0u8; 20];
-        evm_recipient.copy_from_slice(&destination_owner[..20]);
+        let message_data = abi_encode_message(
+            zrc20_address,
+            receiver_evm,
+            nft_origin.token_id,
+            nft_origin.metadata_uri.clone(),
+            sender_evm
+        );
         
-        let gateway_program_ai = ctx.accounts.gateway_program.to_account_info();
-        let user_ai = ctx.accounts.user.to_account_info();
+        // Use the provided destination contract/address as the receiver for the gateway call
         call_gateway(
-            gateway_program_ai,
-            user_ai,   // pass signer
-            evm_recipient,
+            ctx.accounts.gateway_program.to_account_info(),
+            ctx.accounts.user.to_account_info(),
+            zrc20_address,
             message_data,
         )?;
-
+        
         emit!(CrossChainTransferInitiated {
             token_id: nft_origin.token_id,
-            destination_chain,
+            destination_chain: 0, // Will be determined by ZRC-20 address
             destination_owner,
             mint: ctx.accounts.mint.key(),
         });
-
+        
         Ok(())
     }
 
@@ -331,21 +375,36 @@ pub mod universal_nft {
     ) -> Result<()> {
         require!(!ctx.accounts.program_state.paused, ErrorCode::ProgramPaused);
         
-        let cross_chain_message: CrossChainMessage = CrossChainMessage::try_from_slice(&message)?;
+        // Decode ABI-encoded message (address, uint256, string, uint256, address)
+        // Layout (32-byte words):
+        // 0: destination (address padded)
+        // 1: receiver (address padded)
+        // 2: token_id (uint256)
+        // 3: uri (offset as uint256)
+        // 4: sender (address padded)
+        // Then at uri_offset: [len (uint256), bytes..., padding]
+        let receiver_evm: [u8; 20] = message[44..64].try_into().unwrap();
+        let token_id = u64::from_be_bytes(message[96..104].try_into().unwrap());
+        let uri_offset = u64::from_be_bytes(message[128..136].try_into().unwrap()) as usize;
+        let uri_length = u64::from_be_bytes(message[uri_offset..uri_offset + 8].try_into().unwrap()) as usize;
+        let uri = String::from_utf8(message[uri_offset + 8..uri_offset + 8 + uri_length].to_vec()).unwrap();
         
+        let recipient_pubkey = Pubkey::new_from_array({
+            let mut recipient = [0u8; 32];
+            recipient[12..32].copy_from_slice(&receiver_evm);
+            recipient
+        });
+
         let _program_state = &mut ctx.accounts.program_state;
-        let token_id = cross_chain_message.token_id;
 
         let nft_origin = &mut ctx.accounts.nft_origin;
         nft_origin.token_id = token_id;
-        nft_origin.origin_chain = cross_chain_message.origin_chain;
-        nft_origin.origin_token_id = cross_chain_message.origin_token_id;
-        nft_origin.metadata_uri = cross_chain_message.metadata_uri.clone();
+        nft_origin.origin_chain = CHAIN_ID_ZETACHAIN_TESTNET;
+        nft_origin.origin_token_id = token_id;
+        nft_origin.metadata_uri = uri.clone();
         nft_origin.mint = ctx.accounts.mint.key();
         nft_origin.created_at = Clock::get()?.unix_timestamp;
         nft_origin.bump = ctx.bumps.nft_origin;
-
-        let recipient_pubkey = Pubkey::new_from_array(cross_chain_message.recipient);
 
         let mint_to_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
@@ -360,7 +419,7 @@ pub mod universal_nft {
 
         emit!(CrossChainMessageReceived {
             token_id,
-            origin_chain: cross_chain_message.origin_chain,
+            origin_chain: CHAIN_ID_ZETACHAIN_TESTNET,
             mint: ctx.accounts.mint.key(),
             recipient: recipient_pubkey,
         });
@@ -404,6 +463,7 @@ pub mod universal_nft {
 pub struct ProgramState {
     pub owner: Pubkey,
     pub gateway: Pubkey,
+    pub universal_nft_contract: [u8; 20], 
     pub next_token_id: u64,
     pub paused: bool,
     pub bump: u8,
@@ -425,7 +485,8 @@ pub struct Initialize<'info> {
     #[account(
         init,
         payer = payer,
-        space = 8 + 32 + 32 + 8 + 1 + 1,
+        // 8 (disc) + 32 (owner) + 32 (gateway) + 20 (universal_nft_contract) + 8 (next_token_id) + 1 (paused) + 1 (bump)
+        space = 8 + 32 + 32 + 20 + 8 + 1 + 1,
         seeds = [b"test_program_state"],
         bump
     )]

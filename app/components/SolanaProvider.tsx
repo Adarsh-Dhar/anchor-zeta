@@ -36,9 +36,14 @@ export const SolanaProvider: FC<SolanaProviderProps> = ({ children }) => {
         new PhantomWalletAdapter(),
         new SolflareWalletAdapter(),
       ];
+
+      // Deduplicate by adapter name to avoid duplicate React keys (e.g., duplicate "MetaMask")
+      const uniqueByName = Array.from(
+        new Map(walletAdapters.map((w) => [w.name, w])).values()
+      );
       
-      console.log('Initialized wallet adapters:', walletAdapters.map(w => w.name));
-      return walletAdapters;
+      console.log('Initialized wallet adapters:', uniqueByName.map(w => w.name));
+      return uniqueByName;
     } catch (error) {
       console.error('Error initializing wallet adapters:', error);
       return [];

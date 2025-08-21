@@ -45,8 +45,8 @@ const AppContent: React.FC = () => {
 
   // Form states
   const [initializeForm, setInitializeForm] = useState({
-    owner: '',
     gateway: '',
+    evmContract: '0xfeC46bFEE779652CA9c2706F5cA12D92c81B4188',
     nextTokenId: 1
   })
   const [mintForm, setMintForm] = useState({
@@ -154,13 +154,12 @@ const AppContent: React.FC = () => {
     e.preventDefault()
     
     // Validate inputs
-    if (!initializeForm.owner.trim()) {
-      alert('Please enter an owner address');
-      return;
-    }
-    
     if (!initializeForm.gateway.trim()) {
       alert('Please enter a gateway address');
+      return;
+    }
+    if (!initializeForm.evmContract.trim()) {
+      alert('Please enter destination EVM contract');
       return;
     }
     
@@ -170,7 +169,7 @@ const AppContent: React.FC = () => {
     }
     
     try {
-      await initialize(initializeForm.owner, initializeForm.gateway, initializeForm.nextTokenId)
+      await initialize(initializeForm.gateway, initializeForm.nextTokenId, initializeForm.evmContract)
     } catch (err) {
       // Error is already handled by the hook
     }
@@ -486,18 +485,6 @@ const AppContent: React.FC = () => {
             </div>
             <form onSubmit={handleInitialize} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Owner Address</label>
-                <p className="text-sm text-gray-500 mb-2">Public key of the program owner/admin</p>
-                <input
-                  type="text"
-                  value={initializeForm.owner}
-                  onChange={(e) => setInitializeForm({...initializeForm, owner: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., F79VcAwM6VhL9CaZo68W1SwrkntLJpAhcbTLLzuz4g3G"
-                  required
-                />
-              </div>
-              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Gateway Address</label>
                 <p className="text-sm text-gray-500 mb-2">Public key of the cross-chain gateway program</p>
                 <input
@@ -506,6 +493,18 @@ const AppContent: React.FC = () => {
                   onChange={(e) => setInitializeForm({...initializeForm, gateway: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="e.g., Gateway program public key"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Destination EVM Contract (Zeta)</label>
+                <p className="text-sm text-gray-500 mb-2">20-byte hex address, e.g., your UniversalNFT contract on ZetaChain</p>
+                <input
+                  type="text"
+                  value={initializeForm.evmContract}
+                  onChange={(e) => setInitializeForm({...initializeForm, evmContract: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="0x..."
                   required
                 />
               </div>

@@ -41,13 +41,16 @@ export const useProgram = () => {
   }, [wallet.connected, connection]);
 
   // Initialize program
-  const initialize = useCallback(async (owner: string, gateway: string, nextTokenId: number) => {
+  const initialize = useCallback(async (gateway: string, nextTokenId: number, evmContract: string) => {
     if (!wallet.connected || !connection || !wallet.publicKey) {
       throw new Error('Wallet not connected');
     }
 
-    if (!SolanaUtils.isValidPublicKey(owner) || !SolanaUtils.isValidPublicKey(gateway)) {
+    if (!SolanaUtils.isValidPublicKey(gateway)) {
       throw new Error('Invalid public key format');
+    }
+    if (!/^0x[0-9a-fA-F]{40}$/.test(evmContract.trim())) {
+      throw new Error('Invalid EVM contract address');
     }
 
     try {
@@ -56,7 +59,7 @@ export const useProgram = () => {
       setSuccess(null);
       
       const client = new UniversalNFTClient(connection, wallet);
-      const signature = await client.initialize(new PublicKey(gateway), nextTokenId);
+      const signature = await client.initialize(new PublicKey(gateway), nextTokenId, evmContract);
       
       setSuccess(`Program initialized! Signature: ${signature}`);
       

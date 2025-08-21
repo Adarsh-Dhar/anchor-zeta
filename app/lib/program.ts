@@ -6,7 +6,7 @@ import IDL from '../../target/idl/universal_nft.json';
 // Fallback BN import in case the Anchor BN has issues
 
 
-export const PROGRAM_ID = new PublicKey('5baRbZmwFVrudLM8Mea3X8vavVwWEnHr9Dxfm24KqCNd');
+export const PROGRAM_ID = new PublicKey('DkcNjarjaVgEpq65tHDqzNTjcxuo3PyF17sDkc4CrFnm');
 export const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 
 // ZetaChain Testnet Chain ID Constants
@@ -82,12 +82,16 @@ export class UniversalNFTClient {
 
 
   // Initialize the program
-  async initialize(gateway: PublicKey, nextTokenId: number): Promise<string> {
+  async initialize(gateway: PublicKey, nextTokenId: number, evmContractHex: string): Promise<string> {
     try {
       const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
+      // Convert EVM address to bytes20
+      const hex = evmContractHex.trim().toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(hex)) throw new Error('Invalid EVM contract address');
+      const contract20 = Uint8Array.from(Buffer.from(hex.slice(2), 'hex'));
       
       const tx = await this.program.methods
-        .initialize(gateway, new BN(nextTokenId))
+        .initialize(gateway, new BN(nextTokenId), Array.from(contract20))
         .accounts({
           programState: programStatePDA,
           payer: this.wallet.publicKey,
@@ -263,8 +267,8 @@ export class UniversalNFTClient {
   // Initiate cross-chain transfer
   async initiateCrossChainTransfer(
     tokenId: number,
-    destinationChain: number,
-    destinationOwner: Uint8Array
+    destinationChain: number, // kept for UI compatibility/logging; not used in IX args
+    zrc20OrOwner20: Uint8Array // 20-byte EVM address (used as ZRC-20 addr for now)
   ): Promise<string> {
     try {
       console.log('=== INITIATE CROSS-CHAIN TRANSFER START ===');
@@ -273,8 +277,8 @@ export class UniversalNFTClient {
       console.log('Token ID type:', typeof tokenId);
       console.log('Token ID as BigInt:', BigInt(tokenId));
       console.log('Token ID as Buffer:', Buffer.from(tokenId.toString()).toString('hex'));
-      console.log('Destination Chain:', destinationChain);
-      console.log('Destination Owner (bytes):', destinationOwner);
+      console.log('Destination Chain (ignored in ix args):', destinationChain);
+      console.log('ZRC20/Owner bytes20:', zrc20OrOwner20);
       
       const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
       console.log('Program State PDA:', programStatePDA.toString());
@@ -328,16 +332,21 @@ export class UniversalNFTClient {
         throw new Error(`You don't have any tokens to transfer for token ID ${tokenId}. Please mint an NFT first or switch to the wallet that holds it.`);
       }
 
-      // Convert Uint8Array to [u8; 32] format expected by the program
+      // Build destination_owner [u8;32] (left-pad 12 zeros + 20-byte EVM address)
       const destinationOwnerArray = new Uint8Array(32);
-      destinationOwnerArray.set(destinationOwner.slice(0, 32));
-      console.log('Destination Owner Array:', Array.from(destinationOwnerArray));
+      destinationOwnerArray.set(zrc20OrOwner20.slice(0, 20), 12);
+      console.log('Destination Owner [u8;32]:', Array.from(destinationOwnerArray));
+
+      // ZRC-20 address [u8;20]
+      const zrc20Address = new Uint8Array(20);
+      zrc20Address.set(zrc20OrOwner20.slice(0, 20));
+      console.log('ZRC20 Address [u8;20]:', Array.from(zrc20Address));
 
       console.log('Calling program.initiateCrossChainTransfer...');
       const tx = await this.program.methods
         .initiateCrossChainTransfer(
           new BN(tokenId),
-          new BN(destinationChain),
+          Array.from(zrc20Address),
           Array.from(destinationOwnerArray)
         )
         .accounts({
@@ -461,6 +470,12 @@ export class UniversalNFTClient {
       const account = await (this.program.account as any).programState.fetch(programStatePDA);
       return account as ProgramState;
     } catch (error) {
+      // If not initialized yet, the PDA won't exist. Treat this as a benign state.
+      const message = (error as any)?.message || '';
+      if (message.includes('Account does not exist') || message.includes('has no data')) {
+        console.info('Program state not found yet. Initialize the program to create it.');
+        return null;
+      }
       console.error('Error fetching program state:', error);
       return null;
     }
