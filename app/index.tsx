@@ -448,53 +448,6 @@ const AppContent: React.FC = () => {
               </div>
             </div>
             
-            {/* Program State Migration Status */}
-            <div className="bg-white rounded-xl shadow-lg p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Program State Migration</h3>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">
-                    Check if the program state needs migration to the new structure
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    This helps resolve deserialization errors when the program is updated
-                  </p>
-                </div>
-                <div className="space-x-2">
-                  <button
-                    onClick={async () => {
-                      try {
-                        const result = await checkProgramStateMigration();
-                        if (result.needsMigration) {
-                          alert(`Migration Required: ${result.error || 'Program state has old structure'}`);
-                        } else {
-                          alert('✅ Program state is up to date!');
-                        }
-                      } catch (err) {
-                        // Error is already handled by the hook
-                      }
-                    }}
-                    disabled={loading}
-                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed transition-colors"
-                  >
-                    {loading ? 'Checking...' : 'Check Migration Status'}
-                  </button>
-                  <button
-                    onClick={async () => {
-                      try {
-                        await migrateProgramState();
-                      } catch (err) {
-                        // Error is already handled by the hook
-                      }
-                    }}
-                    disabled={loading}
-                    className="bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed transition-colors"
-                  >
-                    {loading ? 'Migrating...' : 'Migrate Program State'}
-                  </button>
-                </div>
-              </div>
-            </div>
             
             {frontendProgramState && (
               <div className="bg-white rounded-xl shadow-lg p-6">
@@ -678,39 +631,7 @@ const AppContent: React.FC = () => {
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Create Mint & Mint NFT</h3>
             
-            {/* Workflow guidance */}
-            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-              <h4 className="text-sm font-medium text-green-800 mb-2">🎯 Next Steps After Creating NFT:</h4>
-              <ol className="text-sm text-green-700 space-y-1 list-decimal list-inside">
-                <li><strong>NFT Created:</strong> Your NFT will be created with a simple sequential token ID (1, 2, 3, etc.)</li>
-                <li><strong>Auto-Populate:</strong> The transfer form will automatically be filled with your new token ID</li>
-                <li><strong>Transfer Ready:</strong> Go to the "Cross-Chain Transfer" tab to transfer your NFT</li>
-              </ol>
-            </div>
             
-            {/* Migration notice */}
-            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <h4 className="text-sm font-medium text-yellow-800 mb-2">⚠️ If You Get Deserialization Errors:</h4>
-              <ul className="text-sm text-yellow-700 space-y-1">
-                <li>• This usually means the program state has the old structure</li>
-                <li>• Go to the "Overview" tab and use the "Migrate Program State" button</li>
-                <li>• Or use the "Check Migration Status" button to diagnose the issue</li>
-                <li>• This is a common issue when programs are upgraded</li>
-              </ul>
-            </div>
-            
-            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ What this does:</h4>
-              <ul className="text-sm text-blue-700 space-y-1">
-                <li>• Creates a new SPL Token mint account with the specified decimals</li>
-                <li>• <strong>Mint address is generated automatically</strong> - you don't need to provide it</li>
-                <li>• Mints 1 NFT token to your wallet</li>
-                <li>• Creates metadata for the NFT (name, symbol, URI)</li>
-                <li>• Creates a master edition for the NFT</li>
-                <li>• Creates an NFT origin record</li>
-                <li>• All in one transaction!</li>
-              </ul>
-            </div>
             <form onSubmit={handleCreateMint} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Metadata URI</label>
@@ -802,48 +723,8 @@ const AppContent: React.FC = () => {
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Initiate Cross-Chain Transfer</h3>
             
-            {/* Step-by-step instructions */}
-            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <h4 className="text-sm font-medium text-blue-800 mb-2">📋 Transfer Workflow:</h4>
-              <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
-                <li><strong>Create NFT:</strong> First, go to the "Create Mint & NFT" tab to mint an NFT</li>
-                <li><strong>Check NFT:</strong> Use the "Check NFT" button below to verify your NFT exists and you have tokens</li>
-                <li><strong>Transfer:</strong> Once verified, initiate the cross-chain transfer</li>
-              </ol>
-            </div>
-            
-            {/* Migration notice for transfer */}
-            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <h4 className="text-sm font-medium text-yellow-800 mb-2">⚠️ Troubleshooting Deserialization Errors:</h4>
-              <ul className="text-sm text-yellow-700 space-y-1">
-                <li>• If you get "Failed to deserialize" errors, the program state needs migration</li>
-                <li>• Go to the "Overview" tab and click "Migrate Program State"</li>
-                <li>• This will fix the account structure and allow operations to proceed</li>
-                <li>• After migration, try your operation again</li>
-              </ul>
-            </div>
-            
-            {/* Token ID System Explanation */}
-            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <h4 className="text-sm font-medium text-yellow-800 mb-2">🔢 Token ID System:</h4>
-              <ul className="text-sm text-yellow-700 space-y-1">
-                <li>• <strong>New NFTs:</strong> Use simple sequential IDs (1, 2, 3, etc.)</li>
-                <li>• <strong>Existing NFTs:</strong> May have complex IDs from the previous system</li>
-                <li>• <strong>How to find your token ID:</strong> Check the "Overview" tab or use the "Check NFT" button below</li>
-                <li>• <strong>Tip:</strong> The "Check NFT" button will tell you exactly what token IDs are available</li>
-              </ul>
-            </div>
-            
-            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-              <h4 className="text-sm font-medium text-green-800 mb-2">✅ ZetaChain Contract Integration Ready:</h4>
-              <ul className="text-sm text-green-700 space-y-1">
-                <li>• Your ZetaChain contract is deployed at: <code className="bg-green-100 px-1 rounded">0xfeC46bFEE779652CA9c2706F5cA12D92c81B4188</code></li>
-                <li>• NFT will be burned on Solana and minted on ZetaChain</li>
-                <li>• Cross-chain message sent via ZetaChain gateway</li>
-                <li>• Your contract's onCall function will handle the NFT minting</li>
-                <li>• You'll get real ZetaChain transaction hashes!</li>
-              </ul>
-            </div>
+           
+           
             <form onSubmit={handleTransfer} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Token ID</label>
@@ -1169,8 +1050,6 @@ const AppContent: React.FC = () => {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-blue-600">Universal NFT</h1>
-                <p className="text-xs text-green-600 font-medium">✅ ZetaChain Integration Ready</p>
-                <p className="text-xs text-yellow-600 font-medium">🔄 Migration Support Available</p>
               </div>
             </div>
             
