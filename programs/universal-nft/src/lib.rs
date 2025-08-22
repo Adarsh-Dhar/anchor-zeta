@@ -29,6 +29,11 @@ pub const CHAIN_ID_ARBITRUM_SEPOLIA: u64 = 421614;
 pub const CHAIN_ID_BITCOIN_TESTNET: u64 = 18332;
 pub const CHAIN_ID_SOLANA: u64 = 0;
 
+// Add these constants for ZetaChain integration
+pub const ZETA_CHAIN_ID: u64 = 7001; // ZetaChain testnet
+pub const ZETA_MAINNET_ID: u64 = 7000; // ZetaChain mainnet
+
+
 // Utility functions
 pub fn get_chain_name(chain_id: u64) -> &'static str {
     match chain_id {
@@ -403,6 +408,30 @@ pub struct ProgramStateMigrated {
     pub admin: Pubkey,
     pub gas_limit: u64,
     pub uniswap_router: Pubkey,
+}
+
+// Universal NFT Core Events (Solidity equivalent events)
+#[event]
+pub struct TokenTransfer {
+    pub receiver: Pubkey,
+    pub destination: [u8; 20],
+    pub token_id: u64,
+    pub uri: String,
+}
+
+#[event]
+pub struct TokenTransferReceived {
+    pub receiver: Pubkey,
+    pub token_id: u64,
+    pub uri: String,
+}
+
+#[event]
+pub struct TokenTransferToDestination {
+    pub receiver: Pubkey,
+    pub destination: [u8; 20],
+    pub token_id: u64,
+    pub uri: String,
 }
 
 // Error codes
