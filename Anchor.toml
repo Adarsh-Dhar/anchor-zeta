@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-universal_nft = "DkcNjarjaVgEpq65tHDqzNTjcxuo3PyF17sDkc4CrFnm"
+universal_nft = "7uVLXw3wQoGjFD1KVGdhFpiWHSwzQKEDASfKiQ8GrAWR"
 
 [registry]
 url = "https://api.apr.dev"

@@ -1,12 +1,12 @@
 import { Program, AnchorProvider, web3, BN } from '@coral-xyz/anchor';
 import { Connection, PublicKey, SYSVAR_RENT_PUBKEY } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
-import IDL from '../../target/idl/universal_nft.json';
+import IDL from '../../target/idl/universal_nft_program.json';
 
 // Fallback BN import in case the Anchor BN has issues
 
 
-export const PROGRAM_ID = new PublicKey('DkcNjarjaVgEpq65tHDqzNTjcxuo3PyF17sDkc4CrFnm');
+export const PROGRAM_ID = new PublicKey('7uVLXw3wQoGjFD1KVGdhFpiWHSwzQKEDASfKiQ8GrAWR');
 export const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 
 // ZetaChain Testnet Chain ID Constants
@@ -82,16 +82,38 @@ export class UniversalNFTClient {
 
 
   // Initialize the program
-  async initialize(gateway: PublicKey, nextTokenId: number, evmContractHex: string): Promise<string> {
+  async initialize(
+    gateway: PublicKey, 
+    nextTokenId: number, 
+    evmContractHex: string,
+    gasLimit: number = 1000000, // Default gas limit
+    uniswapRouter: PublicKey = web3.SystemProgram.programId // Default to system program as placeholder
+  ): Promise<string> {
     try {
       const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
+      console.log('Initializing program with PDA:', programStatePDA.toString());
+      
       // Convert EVM address to bytes20
       const hex = evmContractHex.trim().toLowerCase();
       if (!/^0x[0-9a-f]{40}$/.test(hex)) throw new Error('Invalid EVM contract address');
       const contract20 = Uint8Array.from(Buffer.from(hex.slice(2), 'hex'));
       
+      console.log('Initialize parameters:', {
+        gateway: gateway.toString(),
+        nextTokenId,
+        evmContract: Array.from(contract20),
+        gasLimit,
+        uniswapRouter: uniswapRouter.toString()
+      });
+      
       const tx = await this.program.methods
-        .initialize(gateway, new BN(nextTokenId), Array.from(contract20))
+        .initialize(
+          gateway, 
+          new BN(nextTokenId), 
+          Array.from(contract20),
+          new BN(gasLimit),
+          uniswapRouter
+        )
         .accounts({
           programState: programStatePDA,
           payer: this.wallet.publicKey,
@@ -99,6 +121,7 @@ export class UniversalNFTClient {
         })
         .rpc();
 
+      console.log('Program initialized successfully:', tx);
       return tx;
     } catch (error) {
       console.error('Error initializing program:', error);
@@ -154,7 +177,19 @@ export class UniversalNFTClient {
       console.log('Program state PDA:', programStatePDA.toString());
       
       // Get the current next_token_id from the program state
-      const programState = await (this.program.account as any).programState.fetch(programStatePDA);
+      let programState;
+      try {
+        programState = await (this.program.account as any).programState.fetch(programStatePDA);
+      } catch (error: any) {
+        console.error('Failed to fetch program state:', error);
+        
+        // Check if this is a deserialization error
+        if (error.message && error.message.includes('Failed to deserialize')) {
+          throw new Error(`Program state has old structure and cannot be deserialized. This usually happens when the program was updated but the existing program state account has the old data structure. You may need to reinitialize the program or contact the administrator to migrate the program state. Error: ${error.message}`);
+        }
+        
+        throw new Error(`Failed to fetch program state: ${error.message}`);
+      }
       const currentNextTokenId = programState.nextTokenId;
       console.log('Current next_token_id:', currentNextTokenId.toString());
       
@@ -264,8 +299,8 @@ export class UniversalNFTClient {
     }
   }
 
-  // Initiate cross-chain transfer
-  async initiateCrossChainTransfer(
+  // Transfer NFT cross-chain
+  async transferCrossChain(
     tokenId: number,
     destinationChain: number, // kept for UI compatibility/logging; not used in IX args
     zrc20OrOwner20: Uint8Array // 20-byte EVM address (used as ZRC-20 addr for now)
@@ -303,7 +338,13 @@ export class UniversalNFTClient {
 
       // Load NFT origin to get the real mint
       console.log('Loading NFT origin account...');
-      const nftOriginAccount = await (this.program.account as any).nftOrigin.fetch(nftOriginPDA);
+      let nftOriginAccount;
+      try {
+        nftOriginAccount = await (this.program.account as any).nftOrigin.fetch(nftOriginPDA);
+      } catch (error: any) {
+        console.error('Failed to fetch NFT origin account:', error);
+        throw new Error(`Failed to fetch NFT origin account: ${error.message}`);
+      }
       if (!nftOriginAccount || !nftOriginAccount.mint) {
         throw new Error(`NFT with token ID ${tokenId} does not exist or has invalid mint`);
       }
@@ -342,9 +383,9 @@ export class UniversalNFTClient {
       zrc20Address.set(zrc20OrOwner20.slice(0, 20));
       console.log('ZRC20 Address [u8;20]:', Array.from(zrc20Address));
 
-      console.log('Calling program.initiateCrossChainTransfer...');
+      console.log('Calling program.transferCrossChain...');
       const tx = await this.program.methods
-        .initiateCrossChainTransfer(
+        .transferCrossChain(
           new BN(tokenId),
           Array.from(zrc20Address),
           Array.from(destinationOwnerArray)
@@ -478,6 +519,58 @@ export class UniversalNFTClient {
       }
       console.error('Error fetching program state:', error);
       return null;
+    }
+  }
+
+  // Migrate program state to fix deserialization issues
+  async migrateProgramState(): Promise<string> {
+    try {
+      const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
+      
+      const tx = await this.program.methods
+        .migrateProgramState()
+        .accounts({
+          programState: programStatePDA,
+          payer: this.wallet.publicKey,
+          systemProgram: web3.SystemProgram.programId,
+        })
+        .rpc();
+
+      return tx;
+    } catch (error) {
+      console.error('Error migrating program state:', error);
+      throw error;
+    }
+  }
+
+  // Check if program state needs migration (has old structure)
+  async checkProgramStateMigration(): Promise<{ needsMigration: boolean; error?: string }> {
+    try {
+      const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
+      
+      // Try to fetch the program state
+      const programState = await (this.program.account as any).programState.fetch(programStatePDA);
+      
+      // Check if it has the new fields
+      const hasNewFields = programState.gas_limit !== undefined && programState.uniswap_router !== undefined;
+      
+      return {
+        needsMigration: !hasNewFields,
+        error: undefined
+      };
+    } catch (error: any) {
+      // If we get a deserialization error, it likely needs migration
+      if (error.message && error.message.includes('Failed to deserialize')) {
+        return {
+          needsMigration: true,
+          error: 'Program state has old structure and needs migration'
+        };
+      }
+      
+      return {
+        needsMigration: false,
+        error: error.message || 'Unknown error checking program state'
+      };
     }
   }
 
@@ -1003,7 +1096,7 @@ export class UniversalNFTClient {
   }
 
   // Enhanced cross-chain transfer with destination logging
-  async initiateCrossChainTransferWithLogging(
+  async transferCrossChainWithLogging(
     tokenId: number,
     destinationChain: number,
     destinationOwner: Uint8Array
@@ -1016,8 +1109,8 @@ export class UniversalNFTClient {
       console.log('Input parameters:', { tokenId, destinationChain, destinationOwner });
       
       // Step 1: Initiate the cross-chain transfer (this burns the NFT on Solana)
-      console.log('Step 1: Calling initiateCrossChainTransfer...');
-      const solanaTxSignature = await this.initiateCrossChainTransfer(
+              console.log('Step 1: Calling transferCrossChain...');
+        const solanaTxSignature = await this.transferCrossChain(
         tokenId,
         destinationChain,
         destinationOwner

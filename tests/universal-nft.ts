@@ -432,7 +432,7 @@ describe("Universal NFT Program", () => {
       const destinationChain = 1; // EVM chain
       const destinationOwner = new Uint8Array(32).fill(1); // Test recipient
       await program.methods
-        .initiateCrossChainTransfer(tokenId, destinationChain, Array.from(destinationOwner))
+        .transferCrossChain(tokenId, destinationChain, Array.from(destinationOwner))
         .accounts({
           nftOrigin: nftOriginPda,
           mint: transferMint,

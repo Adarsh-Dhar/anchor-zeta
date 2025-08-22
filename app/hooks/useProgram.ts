@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, SystemProgram } from '@solana/web3.js';
 import { UniversalNFTClient, ProgramState, NFTOrigin } from '../lib/program';
 import { SolanaUtils } from '../lib/utils';
 
@@ -41,7 +41,13 @@ export const useProgram = () => {
   }, [wallet.connected, connection]);
 
   // Initialize program
-  const initialize = useCallback(async (gateway: string, nextTokenId: number, evmContract: string) => {
+  const initialize = useCallback(async (
+    gateway: string, 
+    nextTokenId: number, 
+    evmContract: string,
+    gasLimit: number = 1000000,
+    uniswapRouter: string = '11111111111111111111111111111111'
+  ) => {
     if (!wallet.connected || !connection || !wallet.publicKey) {
       throw new Error('Wallet not connected');
     }
@@ -59,7 +65,14 @@ export const useProgram = () => {
       setSuccess(null);
       
       const client = new UniversalNFTClient(connection, wallet);
-      const signature = await client.initialize(new PublicKey(gateway), nextTokenId, evmContract);
+      // Pass the provided parameters
+      const signature = await client.initialize(
+        new PublicKey(gateway), 
+        nextTokenId, 
+        evmContract,
+        gasLimit,
+        new PublicKey(uniswapRouter)
+      );
       
       setSuccess(`Program initialized! Signature: ${signature}`);
       
@@ -160,7 +173,7 @@ export const useProgram = () => {
       }
       
       const client = new UniversalNFTClient(connection, wallet);
-      const signature = await client.initiateCrossChainTransfer(tokenId, destinationChain, destinationOwnerBytes);
+      const signature = await client.transferCrossChain(tokenId, destinationChain, destinationOwnerBytes);
       
       setSuccess(`Cross-chain transfer initiated successfully! Signature: ${signature}`);
       
@@ -209,8 +222,8 @@ export const useProgram = () => {
       console.log('Destination owner bytes:', destOwnerBytes20);
       console.log('Destination Owner (hex):', Buffer.from(destOwnerBytes20).toString('hex')); // sanity log
       
-      console.log('Calling client.initiateCrossChainTransferWithLogging...');
-      const result = await client.initiateCrossChainTransferWithLogging(
+              console.log('Calling client.transferCrossChainWithLogging...');
+        const result = await client.transferCrossChainWithLogging(
         tokenId,
         destinationChain,
         destOwnerBytes20
@@ -342,6 +355,51 @@ export const useProgram = () => {
     }
   }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
 
+  // Migrate program state to fix deserialization issues
+  const migrateProgramState = useCallback(async () => {
+    if (!wallet.connected || !connection || !wallet.publicKey) {
+      throw new Error('Wallet not connected');
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      setSuccess(null);
+      
+      const client = new UniversalNFTClient(connection, wallet);
+      const signature = await client.migrateProgramState();
+      
+      setSuccess(`Program state migrated successfully! Signature: ${signature}`);
+      
+      // Reload data after successful transaction
+      setTimeout(loadProgramData, 2000);
+      
+      return signature;
+    } catch (err: any) {
+      const errorMessage = err.message || 'Failed to migrate program state';
+      setError(errorMessage);
+      throw new Error(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet.connected, connection, wallet.publicKey, loadProgramData]);
+
+  // Check if program state needs migration
+  const checkProgramStateMigration = useCallback(async () => {
+    if (!wallet.connected || !connection || !wallet.publicKey) {
+      throw new Error('Wallet not connected');
+    }
+
+    try {
+      const client = new UniversalNFTClient(connection, wallet);
+      return await client.checkProgramStateMigration();
+    } catch (err: any) {
+      const errorMessage = err.message || 'Failed to check program state migration';
+      setError(errorMessage);
+      throw new Error(errorMessage);
+    }
+  }, [wallet.connected, connection, wallet.publicKey]);
+
   // Clear messages
   const clearMessages = useCallback(() => {
     setError(null);
@@ -372,6 +430,8 @@ export const useProgram = () => {
     receiveMessage,
     pauseProgram,
     unpauseProgram,
+    migrateProgramState,
+    checkProgramStateMigration,
     clearMessages,
     loadProgramData,
     

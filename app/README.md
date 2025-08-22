@@ -105,7 +105,16 @@ Process incoming cross-chain messages:
 4. Enter the mint address
 5. Click "Receive Message"
 
-### 7. Admin Controls
+### 7. Program State Migration
+
+If you encounter deserialization errors:
+
+1. **Check Migration Status**: Use the "Check Migration Status" button in Overview
+2. **Migrate Program State**: Click "Migrate Program State" to fix old account structures
+3. **Automatic Detection**: The system detects when migration is needed
+4. **Backward Compatibility**: Preserves existing data while adding new fields
+
+### 8. Admin Controls
 
 Program owners can:
 
@@ -143,10 +152,11 @@ app/
 The frontend integrates with these Solana program instructions:
 
 - `initialize`: Set up the program with owner and gateway
-- `mint_nft`: Create new NFTs with metadata
+- `create_mint_and_nft`: Create new NFTs with metadata (all-in-one transaction)
 - `create_nft_origin`: Record NFTs from other chains
-- `initiate_cross_chain_transfer`: Start cross-chain transfers
+- `transfer_cross_chain`: Start cross-chain transfers
 - `receive_cross_chain_message`: Process incoming messages
+- `migrate_program_state`: Fix deserialization issues (backward compatibility)
 - `pause`/`unpause`: Program control (owner only)
 
 ## Error Handling
@@ -206,6 +216,12 @@ anchor deploy --provider.cluster mainnet-beta
    - Verify program ID in `Anchor.toml`
    - Ensure program is deployed to the correct cluster
    - Check network configuration
+
+4. **Deserialization Errors**
+   - **Error**: "Failed to deserialize the account" or "AccountDidNotDeserialize"
+   - **Cause**: Program state account has old structure after program upgrade
+   - **Solution**: Use "Migrate Program State" button in Overview tab
+   - **Alternative**: Reinitialize the program (if you have admin access)
 
 ### Debug Mode
 

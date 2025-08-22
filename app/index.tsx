@@ -34,6 +34,8 @@ const AppContent: React.FC = () => {
     receiveMessage,
     pauseProgram,
     unpauseProgram,
+    migrateProgramState,
+    checkProgramStateMigration,
     clearMessages,
     isConnected,
     crossChainLogs,
@@ -47,7 +49,9 @@ const AppContent: React.FC = () => {
   const [initializeForm, setInitializeForm] = useState({
     gateway: '',
     evmContract: '0xfeC46bFEE779652CA9c2706F5cA12D92c81B4188',
-    nextTokenId: 1
+    nextTokenId: 1,
+    gasLimit: 1000000,
+    uniswapRouter: '11111111111111111111111111111111' // System program as default
   })
   const [mintForm, setMintForm] = useState({
     uri: ''
@@ -169,7 +173,13 @@ const AppContent: React.FC = () => {
     }
     
     try {
-      await initialize(initializeForm.gateway, initializeForm.nextTokenId, initializeForm.evmContract)
+      await initialize(
+        initializeForm.gateway, 
+        initializeForm.nextTokenId, 
+        initializeForm.evmContract,
+        initializeForm.gasLimit,
+        initializeForm.uniswapRouter
+      )
     } catch (err) {
       // Error is already handled by the hook
     }
@@ -204,8 +214,12 @@ const AppContent: React.FC = () => {
       
       // Show success message
       alert(`NFT created successfully!\nMint Address: ${result.mintAddress}\nToken ID: ${result.tokenId}\n\nYou can now use this Token ID for cross-chain transfer.`)
-    } catch (err) {
+    } catch (err: any) {
       // Error is already handled by the hook
+      // Additional guidance for deserialization errors
+      if (err.message && err.message.includes('Failed to deserialize')) {
+        console.log('Deserialization error detected - user should migrate program state');
+      }
     }
   }
 
@@ -347,12 +361,56 @@ const AppContent: React.FC = () => {
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                 <p className="text-red-800">{error}</p>
-                <button 
-                  onClick={clearMessages}
-                  className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
-                >
-                  Dismiss
-                </button>
+                <div className="mt-3 space-y-2">
+                  {error.includes('Failed to deserialize') && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                      <p className="text-sm text-yellow-800 font-medium">🔄 Program State Migration Required</p>
+                      <p className="text-xs text-yellow-700 mt-1">
+                        The program was updated but the existing program state has the old structure. 
+                        This is a common issue when programs are upgraded.
+                      </p>
+                      <div className="mt-2 space-x-2">
+                        <button
+                          onClick={async () => {
+                            try {
+                              await migrateProgramState();
+                            } catch (err) {
+                              // Error is already handled by the hook
+                            }
+                          }}
+                          disabled={loading}
+                          className="text-xs bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-400 text-white px-3 py-1 rounded-md transition-colors"
+                        >
+                          {loading ? 'Migrating...' : 'Migrate Program State'}
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const result = await checkProgramStateMigration();
+                              if (result.needsMigration) {
+                                alert(`Migration Status: ${result.error || 'Program state needs migration'}`);
+                              } else {
+                                alert('Program state is up to date!');
+                              }
+                            } catch (err) {
+                              // Error is already handled by the hook
+                            }
+                          }}
+                          disabled={loading}
+                          className="text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-2 py-1 rounded-md transition-colors"
+                        >
+                          Check Status
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <button 
+                    onClick={clearMessages}
+                    className="text-sm text-red-600 hover:text-red-800 underline"
+                  >
+                    Dismiss Error
+                  </button>
+                </div>
               </div>
             )}
             
@@ -387,6 +445,54 @@ const AppContent: React.FC = () => {
                 <h3 className="text-lg font-semibold text-gray-900">ZetaChain Integration</h3>
                 <p className="text-3xl font-bold text-green-600">✅ Ready</p>
                 <p className="text-xs text-gray-500 mt-1">Contract: 0xfeC46b...4188</p>
+              </div>
+            </div>
+            
+            {/* Program State Migration Status */}
+            <div className="bg-white rounded-xl shadow-lg p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Program State Migration</h3>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">
+                    Check if the program state needs migration to the new structure
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    This helps resolve deserialization errors when the program is updated
+                  </p>
+                </div>
+                <div className="space-x-2">
+                  <button
+                    onClick={async () => {
+                      try {
+                        const result = await checkProgramStateMigration();
+                        if (result.needsMigration) {
+                          alert(`Migration Required: ${result.error || 'Program state has old structure'}`);
+                        } else {
+                          alert('✅ Program state is up to date!');
+                        }
+                      } catch (err) {
+                        // Error is already handled by the hook
+                      }
+                    }}
+                    disabled={loading}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed transition-colors"
+                  >
+                    {loading ? 'Checking...' : 'Check Migration Status'}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await migrateProgramState();
+                      } catch (err) {
+                        // Error is already handled by the hook
+                      }
+                    }}
+                    disabled={loading}
+                    className="bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg disabled:cursor-not-allowed transition-colors"
+                  >
+                    {loading ? 'Migrating...' : 'Migrate Program State'}
+                  </button>
+                </div>
               </div>
             </div>
             
@@ -481,6 +587,7 @@ const AppContent: React.FC = () => {
                 <li>• You need sufficient SOL for transaction fees</li>
                 <li>• The owner address will have admin privileges</li>
                 <li>• The gateway address should be a valid program</li>
+                <li>• Gas limit and Uniswap router can be updated later by admin</li>
               </ul>
             </div>
             <form onSubmit={handleInitialize} className="space-y-4">
@@ -525,6 +632,36 @@ const AppContent: React.FC = () => {
                   required
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Gas Limit</label>
+                <p className="text-sm text-gray-500 mb-2">Gas limit for cross-chain operations (default: 1,000,000)</p>
+                <input
+                  type="number"
+                  value={initializeForm.gasLimit}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value);
+                    if (!isNaN(value)) {
+                      setInitializeForm({...initializeForm, gasLimit: value});
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  min="100000"
+                  step="100000"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Uniswap Router Address</label>
+                <p className="text-sm text-gray-500 mb-2">Public key for Uniswap router (default: System Program)</p>
+                <input
+                  type="text"
+                  value={initializeForm.uniswapRouter}
+                  onChange={(e) => setInitializeForm({...initializeForm, uniswapRouter: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="11111111111111111111111111111111"
+                  required
+                />
+              </div>
               <button 
                 type="submit" 
                 disabled={loading || !isConnected}
@@ -549,6 +686,17 @@ const AppContent: React.FC = () => {
                 <li><strong>Auto-Populate:</strong> The transfer form will automatically be filled with your new token ID</li>
                 <li><strong>Transfer Ready:</strong> Go to the "Cross-Chain Transfer" tab to transfer your NFT</li>
               </ol>
+            </div>
+            
+            {/* Migration notice */}
+            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <h4 className="text-sm font-medium text-yellow-800 mb-2">⚠️ If You Get Deserialization Errors:</h4>
+              <ul className="text-sm text-yellow-700 space-y-1">
+                <li>• This usually means the program state has the old structure</li>
+                <li>• Go to the "Overview" tab and use the "Migrate Program State" button</li>
+                <li>• Or use the "Check Migration Status" button to diagnose the issue</li>
+                <li>• This is a common issue when programs are upgraded</li>
+              </ul>
             </div>
             
             <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
@@ -662,6 +810,17 @@ const AppContent: React.FC = () => {
                 <li><strong>Check NFT:</strong> Use the "Check NFT" button below to verify your NFT exists and you have tokens</li>
                 <li><strong>Transfer:</strong> Once verified, initiate the cross-chain transfer</li>
               </ol>
+            </div>
+            
+            {/* Migration notice for transfer */}
+            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <h4 className="text-sm font-medium text-yellow-800 mb-2">⚠️ Troubleshooting Deserialization Errors:</h4>
+              <ul className="text-sm text-yellow-700 space-y-1">
+                <li>• If you get "Failed to deserialize" errors, the program state needs migration</li>
+                <li>• Go to the "Overview" tab and click "Migrate Program State"</li>
+                <li>• This will fix the account structure and allow operations to proceed</li>
+                <li>• After migration, try your operation again</li>
+              </ul>
             </div>
             
             {/* Token ID System Explanation */}
@@ -1011,6 +1170,7 @@ const AppContent: React.FC = () => {
               <div>
                 <h1 className="text-xl font-bold text-blue-600">Universal NFT</h1>
                 <p className="text-xs text-green-600 font-medium">✅ ZetaChain Integration Ready</p>
+                <p className="text-xs text-yellow-600 font-medium">🔄 Migration Support Available</p>
               </div>
             </div>
             
@@ -1048,7 +1208,8 @@ const AppContent: React.FC = () => {
           <div className="text-center text-gray-600">
             <p>Universal NFT - Cross-Chain NFT Platform</p>
             <p className="text-sm mt-2">Built with Solana, Anchor Framework & ZetaChain</p>
-            <p className="text-xs mt-1 text-green-600">Contract: 0xfeC46bFEE779652CA9c2706F5cA12D92c81B4188</p>
+            <p className="text-xs mt-1 text-green-600">ZetaChain Contract: 0xfeC46bFEE779652CA9c2706F5cA12D92c81B4188</p>
+            <p className="text-xs mt-1 text-blue-600">Solana Program: 7uVLXw3wQoGjFD1KVGdhFpiWHSwzQKEDASfKiQ8GrAWR</p>
           </div>
         </div>
       </footer>
