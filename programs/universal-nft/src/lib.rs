@@ -14,7 +14,7 @@ pub mod universal_nft_core;
 pub use universal_nft::*;
 pub use universal_nft_core::*;
 
-declare_id!("7uVLXw3wQoGjFD1KVGdhFpiWHSwzQKEDASfKiQ8GrAWR");
+declare_id!("Ehu5ED6CaS9D4sF3Ltzvrs3EDD6AeWHjtLMfQxhKdZgm");
 
 // ZetaChain Gateway Program ID
 pub const ZETA_GATEWAY_PROGRAM_ID: &str = "ZETAjseVjuFsxdRxo6MmTCvqFwb3ZHUx56Co3vCmGis";

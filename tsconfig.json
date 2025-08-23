@@ -17,6 +17,6 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["mocha", "chai"]
   },
-  "include": ["app/**/*"],
+  "include": ["app/**/*", "tests/**/*", "target/**/*"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

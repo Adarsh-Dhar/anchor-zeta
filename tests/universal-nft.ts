@@ -27,7 +27,7 @@ describe("Universal NFT Program - Solana to ZetaChain Transfer", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const program = anchor.workspace.UniversalNft as Program<UniversalNftProgram>;
+  const program = anchor.workspace.universal_nft as Program<UniversalNftProgram>;
   const connection = provider.connection;
   const wallet = provider.wallet as anchor.Wallet;
 

@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-universal_nft = "7uVLXw3wQoGjFD1KVGdhFpiWHSwzQKEDASfKiQ8GrAWR"
+universal_nft = "Ehu5ED6CaS9D4sF3Ltzvrs3EDD6AeWHjtLMfQxhKdZgm"
 
 [registry]
 url = "https://api.apr.dev"
@@ -15,10 +15,11 @@ url = "https://api.apr.dev"
 cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
+[workspace]
+members = ["programs/universal-nft"]
+
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
 
 [test]
-startup_wait = 10000
-shutdown_wait = 0
-upgradeable = false
+upgradeable = true
