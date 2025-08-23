@@ -27,7 +27,7 @@ describe("Universal NFT Program - Solana to ZetaChain Transfer", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const program = anchor.workspace.universal_nft as Program<UniversalNftProgram>;
+  const program = anchor.workspace.universal_nft_program as Program<UniversalNftProgram>;
   const connection = provider.connection;
   const wallet = provider.wallet as anchor.Wallet;
 
@@ -467,6 +467,7 @@ describe("Universal NFT Program - Solana to ZetaChain Transfer", () => {
         assert.fail("Should not allow unauthorized user to initiate transfer");
       } catch (error) {
         console.log("Successfully rejected unauthorized cross-chain transfer");
+        // @ts-ignore
         assert.include(error.message, "Error", "Should throw authorization error");
       }
     });
@@ -502,6 +503,7 @@ describe("Universal NFT Program - Solana to ZetaChain Transfer", () => {
         console.log("Program accepted invalid destination address");
       } catch (error) {
         console.log("Program correctly rejected invalid destination address");
+        // @ts-ignore
         assert.include(error.message, "Error", "Should throw validation error");
       }
     });
@@ -624,6 +626,7 @@ describe("Universal NFT Program - Solana to ZetaChain Transfer", () => {
 
           console.log(`Concurrent transfer ${i + 1} initiated successfully`);
         } catch (error) {
+          // @ts-ignore
           console.log(`Concurrent transfer ${i + 1} failed:`, error.message);
         }
       }
