@@ -6,7 +6,7 @@ import IDL from '../../target/idl/universal_nft_program.json';
 // Fallback BN import in case the Anchor BN has issues
 
 
-export const PROGRAM_ID = new PublicKey('7uVLXw3wQoGjFD1KVGdhFpiWHSwzQKEDASfKiQ8GrAWR');
+export const PROGRAM_ID = new PublicKey('HNNDxSioZreQBawW5momWuHmiWJrLmGBKH1LyH6uUZJL');
 export const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 
 // ZetaChain Testnet Chain ID Constants

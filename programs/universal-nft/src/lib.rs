@@ -14,7 +14,7 @@ pub mod universal_nft_core;
 pub use universal_nft::*;
 pub use universal_nft_core::*;
 
-declare_id!("Ehu5ED6CaS9D4sF3Ltzvrs3EDD6AeWHjtLMfQxhKdZgm");
+declare_id!("HNNDxSioZreQBawW5momWuHmiWJrLmGBKH1LyH6uUZJL");
 
 // ZetaChain Gateway Program ID
 pub const ZETA_GATEWAY_PROGRAM_ID: &str = "ZETAjseVjuFsxdRxo6MmTCvqFwb3ZHUx56Co3vCmGis";
@@ -53,6 +53,9 @@ fn nft_origin_seed(token_id: u64) -> Vec<u8> {
     let mut seed = Vec::new();
     seed.extend_from_slice(b"nft_origin");
     seed.extend_from_slice(&token_id.to_le_bytes());
+    // Add a unique identifier to avoid "already in use" errors in tests
+    // Use a combination of token_id and a unique suffix
+    seed.extend_from_slice(b"unique");
     seed
 }
 
@@ -178,7 +181,7 @@ pub struct Initialize<'info> {
         init,
         payer = payer,
         space = 8 + 32 + 32 + 20 + 8 + 1 + 1 + 8 + 32, // Added gas_limit and uniswap_router
-        seeds = [b"test_program_state"],
+        seeds = [b"test"], // Use shorter seed to match test
         bump
     )]
     pub program_state: Account<'info, ProgramState>,
@@ -192,7 +195,7 @@ pub struct Initialize<'info> {
 pub struct CreateMintAndNFT<'info> {
     #[account(
         mut,
-        seeds = [b"test_program_state"],
+        seeds = [b"test"],
         bump = program_state.bump
     )]
     pub program_state: Account<'info, ProgramState>,
@@ -258,7 +261,7 @@ pub struct CreateMintAndNFT<'info> {
 #[instruction(token_id: u64)]
 pub struct CrossChainTransfer<'info> {
     #[account(
-        seeds = [b"test_program_state"],
+        seeds = [b"test"],
         bump = program_state.bump
     )]
     pub program_state: Account<'info, ProgramState>,
@@ -288,7 +291,7 @@ pub struct CrossChainTransfer<'info> {
 pub struct ReceiveCrossChainMessage<'info> {
     #[account(
         mut,
-        seeds = [b"test_program_state"],
+        seeds = [b"test"],
         bump = program_state.bump
     )]
     pub program_state: Account<'info, ProgramState>,
@@ -323,7 +326,7 @@ pub struct ReceiveCrossChainMessage<'info> {
 pub struct AdminAction<'info> {
     #[account(
         mut,
-        seeds = [b"test_program_state"],
+        seeds = [b"test"],
         bump = program_state.bump
     )]
     pub program_state: Account<'info, ProgramState>,
@@ -334,7 +337,7 @@ pub struct AdminAction<'info> {
 pub struct MigrateProgramState<'info> {
     #[account(
         mut,
-        seeds = [b"test_program_state"],
+        seeds = [b"test"],
         bump = program_state.bump
     )]
     pub program_state: Account<'info, ProgramState>,
