@@ -25,7 +25,6 @@ impl UniversalNFT {
         next_token_id: u64,
         universal_nft_contract: [u8; 20],
         gas_limit: u64,
-        uniswap_router: Pubkey,
     ) -> Result<()> {
         let program_state = &mut ctx.accounts.program_state;
         
@@ -37,14 +36,12 @@ impl UniversalNFT {
         program_state.paused = false;
         program_state.bump = ctx.bumps.program_state;
         program_state.gas_limit = gas_limit;
-        program_state.uniswap_router = uniswap_router;
         
         emit!(ProgramInitialized {
             owner: program_state.owner,
             gateway,
             initial_token_id: next_token_id,
             gas_limit,
-            uniswap_router,
         });
         
         Ok(())
@@ -401,12 +398,10 @@ impl UniversalNFT {
         if program_state.gas_limit == 0 {
             // Set default values for new fields
             program_state.gas_limit = 1000000; // Default gas limit
-            program_state.uniswap_router = Pubkey::default(); // Default router address
             
             emit!(ProgramStateMigrated {
                 admin: ctx.accounts.payer.key(),
                 gas_limit: program_state.gas_limit,
-                uniswap_router: program_state.uniswap_router,
             });
         }
         
@@ -420,10 +415,9 @@ impl UniversalNFTCore for UniversalNFT {
         &mut self,
         _gateway: Pubkey,
         _gas_limit: u64,
-        _uniswap_router: Pubkey,
     ) -> Result<()> {
         // Core initialization is handled in the main initialize function
-        // In Solidity: __UniversalNFTCore_init(gatewayAddress, gasLimit, uniswapRouterAddress)
+        // In Solidity: __UniversalNFTCore_init(gatewayAddress, gasLimit)
         Ok(())
     }
 

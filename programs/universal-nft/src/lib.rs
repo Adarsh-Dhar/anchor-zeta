@@ -74,7 +74,6 @@ pub mod universal_nft_program {
         next_token_id: u64,
         universal_nft_contract: [u8; 20],
         gas_limit: u64,
-        uniswap_router: Pubkey,
     ) -> Result<()> {
         universal_nft::UniversalNFT::initialize(
             ctx,
@@ -82,7 +81,6 @@ pub mod universal_nft_program {
             next_token_id,
             universal_nft_contract,
             gas_limit,
-            uniswap_router,
         )
     }
 
@@ -160,7 +158,6 @@ pub struct ProgramState {
     pub paused: bool,
     pub bump: u8,
     pub gas_limit: u64,
-    pub uniswap_router: Pubkey,
 }
 
 #[account]
@@ -180,7 +177,7 @@ pub struct Initialize<'info> {
     #[account(
         init,
         payer = payer,
-        space = 8 + 32 + 32 + 20 + 8 + 1 + 1 + 8 + 32, // Added gas_limit and uniswap_router
+        space = 8 + 32 + 32 + 20 + 8 + 1 + 1 + 8, // Removed uniswap_router space
         seeds = [b"test"], // Use shorter seed to match test
         bump
     )]
@@ -353,7 +350,6 @@ pub struct ProgramInitialized {
     pub gateway: Pubkey,
     pub initial_token_id: u64,
     pub gas_limit: u64,
-    pub uniswap_router: Pubkey,
 }
 
 #[event]
@@ -410,7 +406,6 @@ pub struct MintCreated {
 pub struct ProgramStateMigrated {
     pub admin: Pubkey,
     pub gas_limit: u64,
-    pub uniswap_router: Pubkey,
 }
 
 // Universal NFT Core Events (Solidity equivalent events)

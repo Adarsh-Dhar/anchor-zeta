@@ -32,7 +32,6 @@ pub trait UniversalNFTCore {
         &mut self,
         gateway: Pubkey,
         gas_limit: u64,
-        uniswap_router: Pubkey,
     ) -> Result<()>;
 
     /// Set the gateway address
@@ -73,7 +72,7 @@ pub trait UniversalNFTCore {
     /// Get gas fee for destination chain
     fn get_gas_fee(&self, destination: [u8; 20]) -> Result<([u8; 20], u64)>;
 
-    /// Swap tokens using Uniswap
+    /// Swap tokens for cross-chain operations
     fn swap_tokens(&mut self, zrc20: [u8; 20], amount: u64, destination: [u8; 20]) -> Result<u64>;
 
     /// Approve gateway for token transfer

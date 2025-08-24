@@ -51,7 +51,6 @@ const AppContent: React.FC = () => {
     evmContract: '0xfeC46bFEE779652CA9c2706F5cA12D92c81B4188',
     nextTokenId: 1,
     gasLimit: 1000000,
-    uniswapRouter: '11111111111111111111111111111111' // System program as default
   })
   const [mintForm, setMintForm] = useState({
     uri: ''
@@ -178,7 +177,6 @@ const AppContent: React.FC = () => {
         initializeForm.nextTokenId, 
         initializeForm.evmContract,
         initializeForm.gasLimit,
-        initializeForm.uniswapRouter
       )
     } catch (err) {
       // Error is already handled by the hook
@@ -540,7 +538,7 @@ const AppContent: React.FC = () => {
                 <li>• You need sufficient SOL for transaction fees</li>
                 <li>• The owner address will have admin privileges</li>
                 <li>• The gateway address should be a valid program</li>
-                <li>• Gas limit and Uniswap router can be updated later by admin</li>
+                <li>• Gas limit can be updated later by admin</li>
               </ul>
             </div>
             <form onSubmit={handleInitialize} className="space-y-4">
@@ -600,18 +598,6 @@ const AppContent: React.FC = () => {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   min="100000"
                   step="100000"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Uniswap Router Address</label>
-                <p className="text-sm text-gray-500 mb-2">Public key for Uniswap router (default: System Program)</p>
-                <input
-                  type="text"
-                  value={initializeForm.uniswapRouter}
-                  onChange={(e) => setInitializeForm({...initializeForm, uniswapRouter: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="11111111111111111111111111111111"
                   required
                 />
               </div>

@@ -46,7 +46,6 @@ export const useProgram = () => {
     nextTokenId: number, 
     evmContract: string,
     gasLimit: number = 1000000,
-    uniswapRouter: string = '11111111111111111111111111111111'
   ) => {
     if (!wallet.connected || !connection || !wallet.publicKey) {
       throw new Error('Wallet not connected');
@@ -71,7 +70,6 @@ export const useProgram = () => {
         nextTokenId, 
         evmContract,
         gasLimit,
-        new PublicKey(uniswapRouter)
       );
       
       setSuccess(`Program initialized! Signature: ${signature}`);

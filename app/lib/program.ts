@@ -87,7 +87,6 @@ export class UniversalNFTClient {
     nextTokenId: number, 
     evmContractHex: string,
     gasLimit: number = 1000000, // Default gas limit
-    uniswapRouter: PublicKey = web3.SystemProgram.programId // Default to system program as placeholder
   ): Promise<string> {
     try {
       const [programStatePDA] = UniversalNFTClient.getProgramStatePDA();
@@ -103,7 +102,6 @@ export class UniversalNFTClient {
         nextTokenId,
         evmContract: Array.from(contract20),
         gasLimit,
-        uniswapRouter: uniswapRouter.toString()
       });
       
       const tx = await this.program.methods
@@ -112,7 +110,6 @@ export class UniversalNFTClient {
           new BN(nextTokenId), 
           Array.from(contract20),
           new BN(gasLimit),
-          uniswapRouter
         )
         .accounts({
           programState: programStatePDA,
@@ -552,7 +549,7 @@ export class UniversalNFTClient {
       const programState = await (this.program.account as any).programState.fetch(programStatePDA);
       
       // Check if it has the new fields
-      const hasNewFields = programState.gas_limit !== undefined && programState.uniswap_router !== undefined;
+      const hasNewFields = programState.gas_limit !== undefined;
       
       return {
         needsMigration: !hasNewFields,
