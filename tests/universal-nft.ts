@@ -7,14 +7,17 @@ import {
   SystemProgram, 
   LAMPORTS_PER_SOL, 
   Transaction,
+  TOKEN_PROGRAM_ID, 
+  ASSOCIATED_TOKEN_PROGRAM_ID, 
+  SYSVAR_RENT_PUBKEY,
 } from "@solana/web3.js";
 import { 
-  TOKEN_PROGRAM_ID, 
   createMint, 
   createAccount, 
   mintTo, 
   getAccount, 
-  createAssociatedTokenAccount
+  createAssociatedTokenAccount,
+  getAssociatedTokenAddress
 } from "@solana/spl-token";
 import { assert } from "chai";
 import { BN } from "bn.js";
@@ -145,15 +148,15 @@ describe("Universal NFT Program - Solana to ZetaChain Transfer", () => {
 
       const gateway = new PublicKey("ZETAjseVjuFsxdRxo6MmTCvqFwb3ZHUx56Co3vCmGis"); // ZetaChain Gateway
       const initialTokenId = new BN(1);
-      const universalNftContract = new PublicKey("0x11998e1A5D2e770753263376ceE78B14c9617f16"); // Placeholder for ZetaChain contract
+      const universalNftContract = Buffer.from("11998e1A5D2e770753263376ceE78B14c9617f16", "hex"); // ZetaChain contract as 20-byte array
       const gasLimit = new BN(1000000);
-      const uniswapRouter = new PublicKey("0x2ca7d64A7EFE2D62A725E2B35Cf7230D6677FfEe"); // Placeholder
+      const uniswapRouter = new PublicKey("11111111111111111111111111111111"); // Use a valid Solana public key for testing
 
       await program.methods
         .initialize(
           gateway,
           initialTokenId,
-          Array.from(universalNftContract.toBuffer().slice(0, 20)), // Convert PublicKey to 20-byte array
+          Array.from(universalNftContract), // Convert Buffer to array
           gasLimit,
           uniswapRouter
         )
@@ -328,41 +331,93 @@ describe("Universal NFT Program - Solana to ZetaChain Transfer", () => {
         return;
       }
 
+      // Create a properly formatted cross-chain message
+      const createFormattedMessage = (receiver: Uint8Array, tokenId: number, uri: string, sender: Uint8Array): Buffer => {
+        // Calculate total size needed
+        const uriBytes = Buffer.from(uri, 'utf8');
+        const padding = (32 - (uriBytes.length % 32)) % 32;
+        const totalSize = 100 + 8 + uriBytes.length + padding; // 100 bytes header + 8 bytes length + URI + padding
+        
+        const message = Buffer.alloc(totalSize);
+        
+        // Receiver (address) - 12 bytes padding + 20 bytes address
+        message.fill(0, 0, 12); // 12 bytes padding
+        Buffer.from(receiver).copy(message, 12); // 20 bytes receiver address
+        
+        // Token ID (u64) - 8 bytes at bytes 32-39
+        const tokenIdBytes = Buffer.alloc(8);
+        tokenIdBytes.writeBigUInt64BE(BigInt(tokenId), 0);
+        tokenIdBytes.copy(message, 32);
+        
+        // URI offset (u64) - 8 bytes at bytes 64-71, should be 100
+        const offsetBytes = Buffer.alloc(8);
+        offsetBytes.writeBigUInt64BE(BigInt(100), 0);
+        offsetBytes.copy(message, 64);
+        
+        // Sender (address) - 12 bytes padding + 20 bytes address at bytes 80-99
+        message.fill(0, 72, 80); // 8 bytes padding
+        Buffer.from(sender).copy(message, 80); // 20 bytes sender address
+        
+        // URI length and data starting at byte 100
+        const uriLengthBytes = Buffer.alloc(8);
+        uriLengthBytes.writeBigUInt64BE(BigInt(uriBytes.length), 0);
+        uriLengthBytes.copy(message, 100);
+        uriBytes.copy(message, 108);
+        
+        // Padding to make total length multiple of 32
+        if (padding > 0) {
+          message.fill(0, 108 + uriBytes.length, 108 + uriBytes.length + padding);
+        }
+        
+        return message;
+      };
+
       // Simulate receiving a cross-chain message from ZetaChain
-      const incomingTokenId = new BN(999);
-      const incomingMessage = Buffer.alloc(100).fill(1); // Simulated message
+      const incomingTokenId = 999;
+      const incomingUri = "https://example.com/incoming-nft.json";
+      const incomingMessage = createFormattedMessage(
+        zetaChainRecipient, // receiver (20 bytes)
+        incomingTokenId,     // token ID
+        incomingUri,         // URI
+        solanaSender         // sender (20 bytes)
+      );
 
       // Create NFT origin for incoming message
       const incomingNftOriginPda = PublicKey.findProgramAddressSync(
-                    [Buffer.from("nft_origin"), incomingTokenId.toArrayLike(Buffer, 'le', 8), Buffer.from("unique")],
+                    [Buffer.from("nft_origin"), new BN(incomingTokenId).toArrayLike(Buffer, 'le', 8), Buffer.from("unique")],
         program.programId
       )[0];
 
-      // Create mint for incoming NFT
+      // Create mint for incoming NFT with admin as mint authority
       const incomingMint = await createMint(
         connection,
-        admin,
-        admin.publicKey,
-        admin.publicKey,
-        0
+        admin, // payer
+        admin.publicKey, // mint authority (this should match the payer)
+        admin.publicKey, // freeze authority
+        0 // decimals
       );
 
-      // Create recipient token account
-      const recipientTokenAccount = await createAssociatedTokenAccount(
-        connection,
-        admin,
-        incomingMint,
-        admin.publicKey
+      // Derive the ATA address (don't create it)
+      const recipientTokenAccount = await getAssociatedTokenAddress(
+        incomingMint, // mint
+        admin.publicKey, // owner
+        false // allowOwnerOffCurve
       );
 
       // Process incoming cross-chain message
       await program.methods
-        .receiveCrossChainMessage(incomingTokenId, incomingMessage)
+        .receiveCrossChainMessage(new BN(incomingTokenId), incomingMessage)
         .accounts({
+          programState: programStatePda,
           nftOrigin: incomingNftOriginPda,
           mint: incomingMint,
           mintAuthority: admin.publicKey,
+          recipientTokenAccount: recipientTokenAccount, // Pass the derived ATA address
           payer: admin.publicKey,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          rent: SYSVAR_RENT_PUBKEY,
         })
         .signers([admin])
         .rpc();
@@ -370,7 +425,7 @@ describe("Universal NFT Program - Solana to ZetaChain Transfer", () => {
       console.log("Incoming cross-chain message processed successfully");
 
       // Verify NFT was minted to recipient
-      const tokenAccountInfo = await getAccount(connection, recipientTokenAccount);
+      const tokenAccountInfo = await getAccount(connection, recipientTokenAccount); // Get the ATA for the recipient
       assert.equal(Number(tokenAccountInfo.amount), 1, "NFT should be minted to recipient");
 
       console.log("Incoming NFT successfully minted on Solana");
